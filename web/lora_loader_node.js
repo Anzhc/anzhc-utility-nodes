@@ -302,6 +302,7 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         this.hitAreas = {
             toggle: { bounds: [0, 0], onDown: this.onToggleDown },
             lora: { bounds: [0, 0], onClick: this.onLoraClick },
+            remove: { bounds: [0, 0, 0, 0], onClick: this.onRemoveClick },
             strengthDec: { bounds: [0, 0], onClick: this.onStrengthDecDown },
             strengthVal: { bounds: [0, 0], onClick: this.onStrengthValUp },
             strengthInc: { bounds: [0, 0], onClick: this.onStrengthIncDown },
@@ -359,10 +360,14 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         const innerMargin = margin * 0.33;
         const lowQuality = isLowQuality();
         const midY = posY + height * 0.5;
+        const removeButtonSize = height * 0.7;
+        const removeButtonX = node.size[0] - margin - removeButtonSize;
+        const removeButtonY = posY + (height - removeButtonSize) * 0.5;
         let posX = margin;
         drawRoundedRectangle(ctx, { pos: [posX, posY], size: [node.size[0] - margin * 2, height] });
         this.hitAreas.toggle.bounds = drawTogglePart(ctx, { posX, posY, height, value: this.value.on });
         posX += this.hitAreas.toggle.bounds[1] + innerMargin;
+        this.hitAreas.remove.bounds = [removeButtonX, removeButtonY, removeButtonSize, removeButtonSize];
         if (lowQuality) {
             ctx.restore();
             return;
@@ -371,7 +376,7 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
             ctx.globalAlpha = app.canvas.editor_alpha * 0.4;
         }
         ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-        let rposX = node.size[0] - margin - innerMargin - innerMargin;
+        let rposX = removeButtonX - innerMargin;
         const strengthValue = this.showModelAndClip
             ? ((_c = this.value.strengthTwo) !== null && _c !== void 0 ? _c : 1)
             : ((_d = this.value.strength) !== null && _d !== void 0 ? _d : 1);
@@ -383,7 +388,7 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
             textColor = "#c66";
         }
         const [leftArrow, text, rightArrow] = drawNumberWidgetPart(ctx, {
-            posX: node.size[0] - margin - innerMargin - innerMargin,
+            posX: rposX,
             posY,
             height,
             value: strengthValue,
@@ -440,6 +445,25 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         const loraLabel = String(((_p = this.value) === null || _p === void 0 ? void 0 : _p.lora) || "None");
         ctx.fillText(fitString(ctx, loraLabel, loraWidth), posX, midY);
         this.hitAreas.lora.bounds = [posX, loraWidth];
+        ctx.save();
+        ctx.globalAlpha = app.canvas.editor_alpha;
+        ctx.fillStyle = "#b33";
+        ctx.beginPath();
+        ctx.roundRect(removeButtonX, removeButtonY, removeButtonSize, removeButtonSize, [Math.max(3, removeButtonSize * 0.18)]);
+        ctx.fill();
+        ctx.strokeStyle = "#611";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        const removeInset = removeButtonSize * 0.3;
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(removeButtonX + removeInset, removeButtonY + removeInset);
+        ctx.lineTo(removeButtonX + removeButtonSize - removeInset, removeButtonY + removeButtonSize - removeInset);
+        ctx.moveTo(removeButtonX + removeInset, removeButtonY + removeButtonSize - removeInset);
+        ctx.lineTo(removeButtonX + removeButtonSize - removeInset, removeButtonY + removeInset);
+        ctx.stroke();
+        ctx.restore();
         posX += loraWidth + innerMargin;
         ctx.globalAlpha = app.canvas.editor_alpha;
         ctx.restore();
@@ -474,6 +498,14 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
             node.setDirtyCanvas(true, true);
         });
         this.cancelMouseDown();
+    }
+    onRemoveClick(event, pos, node) {
+        removeArrayItem(node.widgets, this);
+        const computed = node.computeSize();
+        node.size[1] = Math.max((node._tempHeight !== null && node._tempHeight !== void 0 ? node._tempHeight : 15), computed[1]);
+        node.setDirtyCanvas(true, true);
+        this.cancelMouseDown();
+        return true;
     }
     onStrengthDecDown(event, pos, node) {
         this.stepStrength(-1, false);
