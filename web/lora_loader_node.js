@@ -15,6 +15,36 @@ const PROP_LABEL_SHOW_STRENGTHS_STATIC = `@${PROP_LABEL_SHOW_STRENGTHS}`;
 const PROP_VALUE_SHOW_STRENGTHS_SINGLE = "Single Strength";
 const PROP_VALUE_SHOW_STRENGTHS_SEPARATE = "Separate Model & Clip";
 const NODE_CLASS_TYPE = "Anzhc Lora Loader";
+const LORA_WIDGET_MARGIN = 10;
+const LORA_WIDGET_INNER_MARGIN = LORA_WIDGET_MARGIN * 0.33;
+const LORA_INLINE_LABEL_GAP = 5;
+const LORA_INLINE_CONTROL_GAP = 10;
+function getPowerLoraMinWidth(showModelAndClip = false) {
+    const toggleWidth = LiteGraph.NODE_WIDGET_HEIGHT * 1.5;
+    const removeWidth = LiteGraph.NODE_WIDGET_HEIGHT * 0.7;
+    const topStrengthWidth = showModelAndClip
+        ? drawNumberWidgetPart.WIDTH_TOTAL * 2 + LORA_WIDGET_INNER_MARGIN
+        : drawNumberWidgetPart.WIDTH_TOTAL;
+    const topRowMinWidth = LORA_WIDGET_MARGIN * 2 +
+        toggleWidth +
+        LORA_WIDGET_INNER_MARGIN +
+        120 +
+        LORA_WIDGET_INNER_MARGIN +
+        topStrengthWidth +
+        LORA_WIDGET_INNER_MARGIN +
+        removeWidth;
+    const detailRowOneWidth = LORA_WIDGET_MARGIN * 2 + 22 +
+        40 + LORA_INLINE_LABEL_GAP + drawNumberWidgetPart.WIDTH_TOTAL +
+        LORA_INLINE_CONTROL_GAP +
+        40 + LORA_INLINE_LABEL_GAP + drawNumberWidgetPart.WIDTH_TOTAL +
+        LORA_INLINE_CONTROL_GAP +
+        48 + LORA_INLINE_LABEL_GAP + drawNumberWidgetPart.WIDTH_TOTAL;
+    const detailRowTwoWidth = LORA_WIDGET_MARGIN * 2 + 22 +
+        44 + LORA_INLINE_LABEL_GAP + drawNumberWidgetPart.WIDTH_TOTAL +
+        LORA_INLINE_CONTROL_GAP +
+        72 + LORA_INLINE_LABEL_GAP + drawNumberWidgetPart.WIDTH_TOTAL;
+    return Math.ceil(Math.max(topRowMinWidth, detailRowOneWidth, detailRowTwoWidth));
+}
 class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
     constructor(title = NODE_CLASS.title) {
         super(title);
@@ -65,7 +95,7 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
             }
         }
         this.addNonLoraWidgets();
-        this.size[0] = this._tempWidth;
+        this.size[0] = this.computeSize()[0];
         this.size[1] = Math.max(this._tempHeight, this.computeSize()[1]);
     }
     onNodeCreated() {
@@ -77,6 +107,11 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
         this.size[0] = Math.max(this.size[0], computed[0]);
         this.size[1] = Math.max(this.size[1], computed[1]);
         this.setDirtyCanvas(true, true);
+    }
+    onResize(size) {
+        const minWidth = getPowerLoraMinWidth(this.properties[PROP_LABEL_SHOW_STRENGTHS] === PROP_VALUE_SHOW_STRENGTHS_SEPARATE);
+        size[0] = Math.max(size[0], minWidth);
+        return super.onResize ? super.onResize(size) : undefined;
     }
     addNewLoraWidget(lora) {
         this.loraWidgetsCounter++;
@@ -104,6 +139,7 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
                             this.addNewLoraWidget(value);
                             const computed = this.computeSize();
                             const tempHeight = (_b = this._tempHeight) !== null && _b !== void 0 ? _b : 15;
+                            this.size[0] = Math.max(this.size[0], computed[0]);
                             this.size[1] = Math.max(tempHeight, computed[1]);
                             this.setDirtyCanvas(true, true);
                         }
@@ -290,6 +326,11 @@ const DEFAULT_LORA_WIDGET_DATA = {
     lora: null,
     strength: 1,
     strengthTwo: null,
+    early_blocks: 1,
+    mid_blocks: 1,
+    late_blocks: 1,
+    text: 1,
+    others: 1,
 };
 class PowerLoraLoaderWidget extends RgthreeBaseWidget {
     constructor(name) {
@@ -311,140 +352,215 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
             strengthTwoVal: { bounds: [0, 0], onClick: this.onStrengthTwoValUp },
             strengthTwoInc: { bounds: [0, 0], onClick: this.onStrengthTwoIncDown },
             strengthTwoAny: { bounds: [0, 0], onMove: this.onStrengthTwoAnyMove },
+            earlyBlocksDec: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericDecDown("early_blocks") },
+            earlyBlocksVal: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericValUp(event, "early_blocks") },
+            earlyBlocksInc: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericIncDown("early_blocks") },
+            earlyBlocksAny: { bounds: [0, 0], onMove: (event, pos, node) => this.onNumericAnyMove(event, "early_blocks") },
+            midBlocksDec: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericDecDown("mid_blocks") },
+            midBlocksVal: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericValUp(event, "mid_blocks") },
+            midBlocksInc: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericIncDown("mid_blocks") },
+            midBlocksAny: { bounds: [0, 0], onMove: (event, pos, node) => this.onNumericAnyMove(event, "mid_blocks") },
+            lateBlocksDec: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericDecDown("late_blocks") },
+            lateBlocksVal: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericValUp(event, "late_blocks") },
+            lateBlocksInc: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericIncDown("late_blocks") },
+            lateBlocksAny: { bounds: [0, 0], onMove: (event, pos, node) => this.onNumericAnyMove(event, "late_blocks") },
+            textDec: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericDecDown("text") },
+            textVal: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericValUp(event, "text") },
+            textInc: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericIncDown("text") },
+            textAny: { bounds: [0, 0], onMove: (event, pos, node) => this.onNumericAnyMove(event, "text") },
+            othersDec: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericDecDown("others") },
+            othersVal: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericValUp(event, "others") },
+            othersInc: { bounds: [0, 0], onClick: (event, pos, node) => this.onNumericIncDown("others") },
+            othersAny: { bounds: [0, 0], onMove: (event, pos, node) => this.onNumericAnyMove(event, "others") },
         };
-        this._value = {
-            on: true,
-            lora: null,
-            strength: 1,
-            strengthTwo: null,
-        };
+        this._value = { ...DEFAULT_LORA_WIDGET_DATA };
     }
     set value(v) {
-        this._value = v;
-        if (typeof this._value !== "object") {
-            this._value = { ...DEFAULT_LORA_WIDGET_DATA };
-            if (this.showModelAndClip) {
-                this._value.strengthTwo = this._value.strength;
-            }
-        }
+        this._value = this.normalizeValue(v);
         this.getLoraInfo();
     }
     get value() {
         return this._value;
     }
+    normalizeValue(v) {
+        let nextValue = typeof v === "object" && v != null ? { ...DEFAULT_LORA_WIDGET_DATA, ...v } : { ...DEFAULT_LORA_WIDGET_DATA };
+        if (this.showModelAndClip && nextValue.strengthTwo == null) {
+            nextValue.strengthTwo = nextValue.strength;
+        }
+        else if (!this.showModelAndClip) {
+            nextValue.strengthTwo = nextValue.strengthTwo ?? null;
+        }
+        for (const prop of ["strength", "strengthTwo", "early_blocks", "mid_blocks", "late_blocks", "text", "others"]) {
+            if (nextValue[prop] == null) {
+                continue;
+            }
+            const numericValue = Number(nextValue[prop]);
+            nextValue[prop] = Number.isFinite(numericValue) ? numericValue : DEFAULT_LORA_WIDGET_DATA[prop];
+        }
+        return nextValue;
+    }
     setLora(lora) {
         this._value.lora = lora;
         this.getLoraInfo();
     }
-    draw(ctx, node, w, posY, height) {
-        var _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
-        let currentShowModelAndClip = node.properties[PROP_LABEL_SHOW_STRENGTHS] === PROP_VALUE_SHOW_STRENGTHS_SEPARATE;
+    computeSize(width) {
+        const layout = this.getLayoutMetrics();
+        const minWidth = getPowerLoraMinWidth(this.showModelAndClip === true);
+        return [Math.max(width || minWidth, minWidth), layout.totalHeight];
+    }
+    getLayoutMetrics() {
+        const topRowHeight = LiteGraph.NODE_WIDGET_HEIGHT;
+        const detailRowHeight = Math.max(18, Math.round(topRowHeight * 0.9));
+        const paddingY = 6;
+        const rowGap = 3;
+        return {
+            topRowHeight,
+            detailRowHeight,
+            paddingY,
+            rowGap,
+            totalHeight: paddingY * 2 + topRowHeight + rowGap + detailRowHeight + rowGap + detailRowHeight,
+        };
+    }
+    resetHiddenStrengthTwoHitAreas() {
+        this.hitAreas.strengthTwoDec.bounds = [0, -1];
+        this.hitAreas.strengthTwoVal.bounds = [0, -1];
+        this.hitAreas.strengthTwoInc.bounds = [0, -1];
+        this.hitAreas.strengthTwoAny.bounds = [0, -1];
+    }
+    syncStrengthMode(node) {
+        const currentShowModelAndClip = node.properties[PROP_LABEL_SHOW_STRENGTHS] === PROP_VALUE_SHOW_STRENGTHS_SEPARATE;
         if (this.showModelAndClip !== currentShowModelAndClip) {
-            let oldShowModelAndClip = this.showModelAndClip;
+            const oldShowModelAndClip = this.showModelAndClip;
             this.showModelAndClip = currentShowModelAndClip;
             if (this.showModelAndClip) {
                 if (oldShowModelAndClip != null) {
-                    this.value.strengthTwo = (_b = this.value.strength) !== null && _b !== void 0 ? _b : 1;
+                    this.value.strengthTwo = this.value.strength ?? 1;
                 }
             }
             else {
                 this.value.strengthTwo = null;
-                this.hitAreas.strengthTwoDec.bounds = [0, -1];
-                this.hitAreas.strengthTwoVal.bounds = [0, -1];
-                this.hitAreas.strengthTwoInc.bounds = [0, -1];
-                this.hitAreas.strengthTwoAny.bounds = [0, -1];
+                this.resetHiddenStrengthTwoHitAreas();
             }
         }
-        ctx.save();
-        const margin = 10;
-        const innerMargin = margin * 0.33;
-        const lowQuality = isLowQuality();
-        const midY = posY + height * 0.5;
-        const removeButtonSize = height * 0.7;
-        const removeButtonX = node.size[0] - margin - removeButtonSize;
-        const removeButtonY = posY + (height - removeButtonSize) * 0.5;
-        let posX = margin;
-        drawRoundedRectangle(ctx, { pos: [posX, posY], size: [node.size[0] - margin * 2, height] });
-        this.hitAreas.toggle.bounds = drawTogglePart(ctx, { posX, posY, height, value: this.value.on });
-        posX += this.hitAreas.toggle.bounds[1] + innerMargin;
-        this.hitAreas.remove.bounds = [removeButtonX, removeButtonY, removeButtonSize, removeButtonSize];
-        if (lowQuality) {
-            ctx.restore();
-            return;
+    }
+    getStrengthTextColor(value) {
+        var _b, _c, _d, _e;
+        if (((_b = this.loraInfo) === null || _b === void 0 ? void 0 : _b.strengthMax) != null && value > ((_c = this.loraInfo) === null || _c === void 0 ? void 0 : _c.strengthMax)) {
+            return "#c66";
         }
+        if (((_d = this.loraInfo) === null || _d === void 0 ? void 0 : _d.strengthMin) != null && value < ((_e = this.loraInfo) === null || _e === void 0 ? void 0 : _e.strengthMin)) {
+            return "#c66";
+        }
+        return undefined;
+    }
+    setNumberHitAreas(baseName, leftArrow, text, rightArrow, posY, height) {
+        this.hitAreas[`${baseName}Dec`].bounds = [leftArrow[0], posY, leftArrow[1], height];
+        this.hitAreas[`${baseName}Val`].bounds = [text[0], posY, text[1], height];
+        this.hitAreas[`${baseName}Inc`].bounds = [rightArrow[0], posY, rightArrow[1], height];
+        this.hitAreas[`${baseName}Any`].bounds = [leftArrow[0], posY, rightArrow[0] + rightArrow[1] - leftArrow[0], height];
+    }
+    drawInlineNumberControl(ctx, baseName, label, value, posX, posY, height, textColor) {
+        const labelGap = LORA_INLINE_LABEL_GAP;
+        const controlGap = LORA_INLINE_CONTROL_GAP;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, posX, posY + height * 0.5);
+        posX += ctx.measureText(label).width + labelGap;
+        const [leftArrow, text, rightArrow] = drawNumberWidgetPart(ctx, {
+            posX,
+            posY,
+            height,
+            value,
+            textColor,
+        });
+        this.setNumberHitAreas(baseName, leftArrow, text, rightArrow, posY, height);
+        return rightArrow[0] + rightArrow[1] + controlGap;
+    }
+    draw(ctx, node, w, posY, height) {
+        var _b, _c;
+        this.syncStrengthMode(node);
+        const layout = this.getLayoutMetrics();
+        const widgetHeight = Math.max(height, layout.totalHeight);
+        ctx.save();
+        const margin = LORA_WIDGET_MARGIN;
+        const innerMargin = LORA_WIDGET_INNER_MARGIN;
+        const lowQuality = isLowQuality();
+        const topRowY = posY + layout.paddingY;
+        const middleRowY = topRowY + layout.topRowHeight + layout.rowGap;
+        const bottomRowY = middleRowY + layout.detailRowHeight + layout.rowGap;
+        const topMidY = topRowY + layout.topRowHeight * 0.5;
+        const removeButtonSize = layout.topRowHeight * 0.7;
+        const removeButtonX = node.size[0] - margin - removeButtonSize;
+        const removeButtonY = posY + (widgetHeight - removeButtonSize) * 0.5;
+        let posX = margin;
+        ctx.save();
+        ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+        ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+        ctx.beginPath();
+        ctx.roundRect(posX, posY, node.size[0] - margin * 2, widgetHeight, [0]);
+        ctx.fill();
+        if (!lowQuality) {
+            ctx.stroke();
+        }
+        ctx.restore();
+        const toggleBounds = drawTogglePart(ctx, { posX, posY: topRowY, height: layout.topRowHeight, value: this.value.on });
+        this.hitAreas.toggle.bounds = [toggleBounds[0], topRowY, toggleBounds[1], layout.topRowHeight];
+        posX += toggleBounds[1] + innerMargin;
+        this.hitAreas.remove.bounds = [removeButtonX, removeButtonY, removeButtonSize, removeButtonSize];
         if (!this.value.on) {
             ctx.globalAlpha = app.canvas.editor_alpha * 0.4;
         }
         ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
         let rposX = removeButtonX - innerMargin;
-        const strengthValue = this.showModelAndClip
-            ? ((_c = this.value.strengthTwo) !== null && _c !== void 0 ? _c : 1)
-            : ((_d = this.value.strength) !== null && _d !== void 0 ? _d : 1);
-        let textColor = undefined;
-        if (((_e = this.loraInfo) === null || _e === void 0 ? void 0 : _e.strengthMax) != null && strengthValue > ((_f = this.loraInfo) === null || _f === void 0 ? void 0 : _f.strengthMax)) {
-            textColor = "#c66";
-        }
-        else if (((_g = this.loraInfo) === null || _g === void 0 ? void 0 : _g.strengthMin) != null && strengthValue < ((_h = this.loraInfo) === null || _h === void 0 ? void 0 : _h.strengthMin)) {
-            textColor = "#c66";
-        }
+        const clipStrengthValue = this.showModelAndClip
+            ? ((_b = this.value.strengthTwo) !== null && _b !== void 0 ? _b : 1)
+            : ((_c = this.value.strength) !== null && _c !== void 0 ? _c : 1);
         const [leftArrow, text, rightArrow] = drawNumberWidgetPart(ctx, {
             posX: rposX,
-            posY,
-            height,
-            value: strengthValue,
+            posY: topRowY,
+            height: layout.topRowHeight,
+            value: clipStrengthValue,
             direction: -1,
-            textColor,
+            textColor: this.getStrengthTextColor(clipStrengthValue),
         });
-        this.hitAreas.strengthDec.bounds = leftArrow;
-        this.hitAreas.strengthVal.bounds = text;
-        this.hitAreas.strengthInc.bounds = rightArrow;
-        this.hitAreas.strengthAny.bounds = [leftArrow[0], rightArrow[0] + rightArrow[1] - leftArrow[0]];
+        if (this.showModelAndClip) {
+            this.setNumberHitAreas("strengthTwo", leftArrow, text, rightArrow, topRowY, layout.topRowHeight);
+        }
+        else {
+            this.setNumberHitAreas("strength", leftArrow, text, rightArrow, topRowY, layout.topRowHeight);
+        }
         rposX = leftArrow[0] - innerMargin;
         if (this.showModelAndClip) {
             rposX -= innerMargin;
-            this.hitAreas.strengthTwoDec.bounds = this.hitAreas.strengthDec.bounds;
-            this.hitAreas.strengthTwoVal.bounds = this.hitAreas.strengthVal.bounds;
-            this.hitAreas.strengthTwoInc.bounds = this.hitAreas.strengthInc.bounds;
-            this.hitAreas.strengthTwoAny.bounds = this.hitAreas.strengthAny.bounds;
-            let textColor = undefined;
-            if (((_j = this.loraInfo) === null || _j === void 0 ? void 0 : _j.strengthMax) != null && this.value.strength > ((_k = this.loraInfo) === null || _k === void 0 ? void 0 : _k.strengthMax)) {
-                textColor = "#c66";
-            }
-            else if (((_l = this.loraInfo) === null || _l === void 0 ? void 0 : _l.strengthMin) != null &&
-                this.value.strength < ((_m = this.loraInfo) === null || _m === void 0 ? void 0 : _m.strengthMin)) {
-                textColor = "#c66";
-            }
+            const modelStrengthValue = this.value.strength ?? 1;
             const [leftArrow, text, rightArrow] = drawNumberWidgetPart(ctx, {
                 posX: rposX,
-                posY,
-                height,
-                value: (_o = this.value.strength) !== null && _o !== void 0 ? _o : 1,
+                posY: topRowY,
+                height: layout.topRowHeight,
+                value: modelStrengthValue,
                 direction: -1,
-                textColor,
+                textColor: this.getStrengthTextColor(modelStrengthValue),
             });
-            this.hitAreas.strengthDec.bounds = leftArrow;
-            this.hitAreas.strengthVal.bounds = text;
-            this.hitAreas.strengthInc.bounds = rightArrow;
-            this.hitAreas.strengthAny.bounds = [
-                leftArrow[0],
-                rightArrow[0] + rightArrow[1] - leftArrow[0],
-            ];
+            this.setNumberHitAreas("strength", leftArrow, text, rightArrow, topRowY, layout.topRowHeight);
             rposX = leftArrow[0] - innerMargin;
         }
-        const infoIconSize = height * 0.66;
+        else {
+            this.resetHiddenStrengthTwoHitAreas();
+        }
+        const infoIconSize = layout.topRowHeight * 0.66;
         const infoWidth = infoIconSize + innerMargin + innerMargin;
         if (this.hitAreas["info"]) {
             rposX -= innerMargin;
-            drawInfoIcon(ctx, rposX - infoIconSize, posY + (height - infoIconSize) / 2, infoIconSize);
-            this.hitAreas.info.bounds = [rposX - infoIconSize, infoWidth];
+            drawInfoIcon(ctx, rposX - infoIconSize, topRowY + (layout.topRowHeight - infoIconSize) / 2, infoIconSize);
+            this.hitAreas.info.bounds = [rposX - infoIconSize, topRowY, infoWidth, layout.topRowHeight];
             rposX = rposX - infoIconSize - innerMargin;
         }
         const loraWidth = rposX - posX;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        const loraLabel = String(((_p = this.value) === null || _p === void 0 ? void 0 : _p.lora) || "None");
-        ctx.fillText(fitString(ctx, loraLabel, loraWidth), posX, midY);
-        this.hitAreas.lora.bounds = [posX, loraWidth];
+        const loraLabel = String((this.value === null || this.value === void 0 ? void 0 : this.value.lora) || "None");
+        ctx.fillText(fitString(ctx, loraLabel, loraWidth), posX, topMidY);
+        this.hitAreas.lora.bounds = [posX, topRowY, loraWidth, layout.topRowHeight];
         ctx.save();
         ctx.globalAlpha = app.canvas.editor_alpha;
         ctx.fillStyle = "#b33";
@@ -464,8 +580,17 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         ctx.lineTo(removeButtonX + removeButtonSize - removeInset, removeButtonY + removeInset);
         ctx.stroke();
         ctx.restore();
-        posX += loraWidth + innerMargin;
-        ctx.globalAlpha = app.canvas.editor_alpha;
+        if (!lowQuality) {
+            ctx.globalAlpha = app.canvas.editor_alpha * (this.value.on ? 0.8 : 0.45);
+            ctx.fillStyle = LiteGraph.WIDGET_SECONDARY_TEXT_COLOR;
+            let detailPosX = margin + 22;
+            detailPosX = this.drawInlineNumberControl(ctx, "earlyBlocks", "Low", this.value.early_blocks ?? 1, detailPosX, middleRowY, layout.detailRowHeight);
+            detailPosX = this.drawInlineNumberControl(ctx, "midBlocks", "Mid", this.value.mid_blocks ?? 1, detailPosX, middleRowY, layout.detailRowHeight);
+            this.drawInlineNumberControl(ctx, "lateBlocks", "Late", this.value.late_blocks ?? 1, detailPosX, middleRowY, layout.detailRowHeight);
+            detailPosX = margin + 22;
+            detailPosX = this.drawInlineNumberControl(ctx, "text", "Text", this.value.text ?? 1, detailPosX, bottomRowY, layout.detailRowHeight);
+            this.drawInlineNumberControl(ctx, "others", "Others", this.value.others ?? 1, detailPosX, bottomRowY, layout.detailRowHeight);
+        }
         ctx.restore();
     }
     serializeValue(node, index) {
@@ -502,6 +627,7 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
     onRemoveClick(event, pos, node) {
         removeArrayItem(node.widgets, this);
         const computed = node.computeSize();
+        node.size[0] = Math.max(node.size[0], computed[0]);
         node.size[1] = Math.max((node._tempHeight !== null && node._tempHeight !== void 0 ? node._tempHeight : 15), computed[1]);
         node.setDirtyCanvas(true, true);
         this.cancelMouseDown();
@@ -524,6 +650,24 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
     }
     onStrengthTwoAnyMove(event, pos, node) {
         this.doOnStrengthAnyMove(event, true);
+    }
+    onNumericDecDown(prop) {
+        this.stepStrengthByProperty(prop, -1);
+    }
+    onNumericIncDown(prop) {
+        this.stepStrengthByProperty(prop, 1);
+    }
+    onNumericAnyMove(event, prop) {
+        if (event.deltaX) {
+            this.haveMouseMovedStrength = true;
+            this.value[prop] = (this.value[prop] ?? 1) + event.deltaX * 0.05;
+        }
+    }
+    onNumericValUp(event, prop) {
+        if (this.haveMouseMovedStrength)
+            return;
+        const canvas = app.canvas;
+        canvas.prompt("Value", this.value[prop], (v) => (this.value[prop] = Number(v)), event);
     }
     doOnStrengthAnyMove(event, isTwo = false) {
         var _b;
@@ -566,6 +710,11 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         let step = 0.05;
         let prop = isTwo ? "strengthTwo" : "strength";
         let strength = ((_b = this.value[prop]) !== null && _b !== void 0 ? _b : 1) + step * direction;
+        this.value[prop] = Math.round(strength * 100) / 100;
+    }
+    stepStrengthByProperty(prop, direction) {
+        const step = 0.05;
+        const strength = (this.value[prop] ?? 1) + step * direction;
         this.value[prop] = Math.round(strength * 100) / 100;
     }
     getLoraInfo(force = false) {

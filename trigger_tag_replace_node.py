@@ -5,6 +5,7 @@ import re
 
 TRIGGER_TAG_PATTERN = re.compile(r"(?<![A-Za-z0-9_])TRIGGER(?![A-Za-z0-9_])")
 PAREN_CONTENT_PATTERN = re.compile(r"\(([^()]*)\)")
+MULTISPACE_PATTERN = re.compile(r"\s{2,}")
 
 
 def _extract_parenthetical_values(text: str) -> list[str]:
@@ -21,13 +22,24 @@ def _extract_parenthetical_values(text: str) -> list[str]:
     return values
 
 
+def _cleanup_prompt_text(text: str) -> str:
+    segments: list[str] = []
+
+    for raw_segment in text.split(","):
+        segment = MULTISPACE_PATTERN.sub(" ", raw_segment).strip()
+        if segment:
+            segments.append(segment)
+
+    return ", ".join(segments)
+
+
 def replace_trigger_tag(template_text: str, source_text: str) -> str:
     if not TRIGGER_TAG_PATTERN.search(template_text):
         return template_text
 
     replacements = _extract_parenthetical_values(source_text)
     if not replacements:
-        return template_text
+        return _cleanup_prompt_text(TRIGGER_TAG_PATTERN.sub("", template_text))
 
     return TRIGGER_TAG_PATTERN.sub(", ".join(replacements), template_text)
 
@@ -47,7 +59,7 @@ class AnzhcTriggerTagReplace:
     CATEGORY = "anzhc/utility"
     DESCRIPTION = (
         "Replaces exact TRIGGER tags in the first string with the unique (...) values from "
-        "the second string, joined by commas."
+        "the second string, joined by commas. If no trigger values are found, TRIGGER is removed."
     )
 
     @classmethod
