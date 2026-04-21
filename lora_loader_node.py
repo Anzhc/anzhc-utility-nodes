@@ -227,6 +227,7 @@ class AnzhcLoraLoader:
             if key.startswith("LORA_") and "on" in value and "lora" in value and "strength" in value:
                 strength_model = value["strength"]
                 strength_clip = value["strengthTwo"] if "strengthTwo" in value else None
+                block_weights_enabled = value.get("block_weights_enabled", True)
 
                 if clip is None:
                     strength_clip = 0
@@ -274,7 +275,7 @@ class AnzhcLoraLoader:
                             if not patches:
                                 continue
 
-                            group_multiplier = _get_block_weight(value, group_name)
+                            group_multiplier = _get_block_weight(value, group_name) if block_weights_enabled else 1.0
                             model_multiplier = strength_model * group_multiplier
                             clip_multiplier = strength_clip * group_multiplier
 

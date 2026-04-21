@@ -11,6 +11,7 @@ import { moveArrayItem, removeArrayItem } from "/rgthree/common/shared_utils.js"
 import { RgthreeLoraInfoDialog } from "/extensions/rgthree-comfy/dialog_info.js";
 import { LORA_INFO_SERVICE } from "/rgthree/common/model_info_service.js";
 const PROP_LABEL_SHOW_STRENGTHS = "Show Strengths";
+const PROP_LABEL_BLOCK_WEIGHTS = "Block Weights Enabled";
 const PROP_LABEL_SHOW_STRENGTHS_STATIC = `@${PROP_LABEL_SHOW_STRENGTHS}`;
 const PROP_VALUE_SHOW_STRENGTHS_SINGLE = "Single Strength";
 const PROP_VALUE_SHOW_STRENGTHS_SEPARATE = "Separate Model & Clip";
@@ -19,7 +20,7 @@ const LORA_WIDGET_MARGIN = 10;
 const LORA_WIDGET_INNER_MARGIN = LORA_WIDGET_MARGIN * 0.33;
 const LORA_INLINE_LABEL_GAP = 5;
 const LORA_INLINE_CONTROL_GAP = 10;
-function getPowerLoraMinWidth(showModelAndClip = false) {
+function getPowerLoraMinWidth(showModelAndClip = false, showBlockWeights = true) {
     const toggleWidth = LiteGraph.NODE_WIDGET_HEIGHT * 1.5;
     const removeWidth = LiteGraph.NODE_WIDGET_HEIGHT * 0.7;
     const topStrengthWidth = showModelAndClip
@@ -33,6 +34,18 @@ function getPowerLoraMinWidth(showModelAndClip = false) {
         topStrengthWidth +
         LORA_WIDGET_INNER_MARGIN +
         removeWidth;
+    const headerButtonWidth = 82;
+    const headerMinWidth = LORA_WIDGET_MARGIN * 2 +
+        toggleWidth +
+        LORA_WIDGET_INNER_MARGIN +
+        88 +
+        LORA_WIDGET_INNER_MARGIN +
+        headerButtonWidth +
+        LORA_WIDGET_INNER_MARGIN +
+        drawNumberWidgetPart.WIDTH_TOTAL;
+    if (!showBlockWeights) {
+        return Math.ceil(Math.max(topRowMinWidth, headerMinWidth));
+    }
     const detailRowOneWidth = LORA_WIDGET_MARGIN * 2 + 22 +
         40 + LORA_INLINE_LABEL_GAP + drawNumberWidgetPart.WIDTH_TOTAL +
         LORA_INLINE_CONTROL_GAP +
@@ -43,7 +56,7 @@ function getPowerLoraMinWidth(showModelAndClip = false) {
         44 + LORA_INLINE_LABEL_GAP + drawNumberWidgetPart.WIDTH_TOTAL +
         LORA_INLINE_CONTROL_GAP +
         72 + LORA_INLINE_LABEL_GAP + drawNumberWidgetPart.WIDTH_TOTAL;
-    return Math.ceil(Math.max(topRowMinWidth, detailRowOneWidth, detailRowTwoWidth));
+    return Math.ceil(Math.max(topRowMinWidth, headerMinWidth, detailRowOneWidth, detailRowTwoWidth));
 }
 class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
     constructor(title = NODE_CLASS.title) {
@@ -53,6 +66,7 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
         this.loraWidgetsCounter = 0;
         this.widgetButtonSpacer = null;
         this.properties[PROP_LABEL_SHOW_STRENGTHS] = PROP_VALUE_SHOW_STRENGTHS_SINGLE;
+        this.properties[PROP_LABEL_BLOCK_WEIGHTS] = this.properties[PROP_LABEL_BLOCK_WEIGHTS] !== false;
         rgthreeApi.getLoras();
         if (rgthree.loadingApiJson) {
             const fullApiJson = rgthree.loadingApiJson;
@@ -108,14 +122,27 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
         this.size[1] = Math.max(this.size[1], computed[1]);
         this.setDirtyCanvas(true, true);
     }
+    areBlockWeightsEnabled() {
+        return this.properties[PROP_LABEL_BLOCK_WEIGHTS] !== false;
+    }
+    getMinWidth() {
+        return getPowerLoraMinWidth(this.properties[PROP_LABEL_SHOW_STRENGTHS] === PROP_VALUE_SHOW_STRENGTHS_SEPARATE, this.areBlockWeightsEnabled());
+    }
     onResize(size) {
-        const minWidth = getPowerLoraMinWidth(this.properties[PROP_LABEL_SHOW_STRENGTHS] === PROP_VALUE_SHOW_STRENGTHS_SEPARATE);
-        size[0] = Math.max(size[0], minWidth);
+        size[0] = Math.max(size[0], this.getMinWidth());
         return super.onResize ? super.onResize(size) : undefined;
+    }
+    toggleBlockWeights() {
+        this.properties[PROP_LABEL_BLOCK_WEIGHTS] = !this.areBlockWeightsEnabled();
+        const computed = this.computeSize();
+        this.size[0] = Math.max(this.size[0], this.getMinWidth());
+        this.size[1] = Math.max(this._tempHeight || 15, computed[1]);
+        this.setDirtyCanvas(true, true);
     }
     addNewLoraWidget(lora) {
         this.loraWidgetsCounter++;
         const widget = this.addCustomWidget(new PowerLoraLoaderWidget("lora_" + this.loraWidgetsCounter));
+        widget.node = this;
         if (lora)
             widget.setLora(lora);
         if (this.widgetButtonSpacer) {
@@ -280,6 +307,7 @@ class PowerLoraLoaderHeaderWidget extends RgthreeBaseWidget {
         this.type = "custom";
         this.hitAreas = {
             toggle: { bounds: [0, 0], onDown: this.onToggleDown },
+            blockWeights: { bounds: [0, 0, 0, 0], onClick: this.onBlockWeightsClick },
         };
         this.showModelAndClip = null;
     }
@@ -293,6 +321,7 @@ class PowerLoraLoaderHeaderWidget extends RgthreeBaseWidget {
         const innerMargin = margin * 0.33;
         const lowQuality = isLowQuality();
         const allLoraState = node.allLorasState();
+        const blockWeightsEnabled = node.areBlockWeightsEnabled();
         posY += 2;
         const midY = posY + height * 0.5;
         let posX = 10;
@@ -305,6 +334,23 @@ class PowerLoraLoaderHeaderWidget extends RgthreeBaseWidget {
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
             ctx.fillText("Toggle All", posX, midY);
+            const buttonLabel = blockWeightsEnabled ? "Hide Weights" : "Show Weights";
+            const buttonPaddingX = 8;
+            const buttonWidth = Math.ceil(ctx.measureText(buttonLabel).width + buttonPaddingX * 2);
+            const buttonHeight = Math.max(18, height - 8);
+            const buttonX = posX + ctx.measureText("Toggle All").width + innerMargin * 3;
+            const buttonY = posY + (height - buttonHeight) * 0.5;
+            ctx.save();
+            ctx.globalAlpha = app.canvas.editor_alpha * (blockWeightsEnabled ? 0.18 : 0.10);
+            ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+            ctx.beginPath();
+            ctx.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, [4]);
+            ctx.fill();
+            ctx.restore();
+            ctx.globalAlpha = app.canvas.editor_alpha * 0.75;
+            ctx.textAlign = "center";
+            ctx.fillText(buttonLabel, buttonX + buttonWidth * 0.5, midY);
+            this.hitAreas.blockWeights.bounds = [buttonX, buttonY, buttonWidth, buttonHeight];
             let rposX = node.size[0] - margin - innerMargin - innerMargin;
             ctx.textAlign = "center";
             ctx.fillText(this.showModelAndClip ? "Clip" : "Strength", rposX - drawNumberWidgetPart.WIDTH_TOTAL / 2, midY);
@@ -317,6 +363,11 @@ class PowerLoraLoaderHeaderWidget extends RgthreeBaseWidget {
     }
     onToggleDown(event, pos, node) {
         node.toggleAllLoras();
+        this.cancelMouseDown();
+        return true;
+    }
+    onBlockWeightsClick(event, pos, node) {
+        node.toggleBlockWeights();
         this.cancelMouseDown();
         return true;
     }
@@ -403,9 +454,13 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         this._value.lora = lora;
         this.getLoraInfo();
     }
+    areBlockWeightsEnabled() {
+        var _b;
+        return ((_b = this.node) === null || _b === void 0 ? void 0 : _b.areBlockWeightsEnabled()) !== false;
+    }
     computeSize(width) {
         const layout = this.getLayoutMetrics();
-        const minWidth = getPowerLoraMinWidth(this.showModelAndClip === true);
+        const minWidth = getPowerLoraMinWidth(this.showModelAndClip === true, this.areBlockWeightsEnabled());
         return [Math.max(width || minWidth, minWidth), layout.totalHeight];
     }
     getLayoutMetrics() {
@@ -413,12 +468,15 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         const detailRowHeight = Math.max(18, Math.round(topRowHeight * 0.9));
         const paddingY = 6;
         const rowGap = 3;
+        const blockWeightsEnabled = this.areBlockWeightsEnabled();
         return {
             topRowHeight,
             detailRowHeight,
             paddingY,
             rowGap,
-            totalHeight: paddingY * 2 + topRowHeight + rowGap + detailRowHeight + rowGap + detailRowHeight,
+            totalHeight: blockWeightsEnabled
+                ? paddingY * 2 + topRowHeight + rowGap + detailRowHeight + rowGap + detailRowHeight
+                : paddingY * 2 + topRowHeight,
         };
     }
     resetHiddenStrengthTwoHitAreas() {
@@ -426,6 +484,28 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         this.hitAreas.strengthTwoVal.bounds = [0, -1];
         this.hitAreas.strengthTwoInc.bounds = [0, -1];
         this.hitAreas.strengthTwoAny.bounds = [0, -1];
+    }
+    resetBlockWeightHitAreas() {
+        this.hitAreas.earlyBlocksDec.bounds = [0, -1];
+        this.hitAreas.earlyBlocksVal.bounds = [0, -1];
+        this.hitAreas.earlyBlocksInc.bounds = [0, -1];
+        this.hitAreas.earlyBlocksAny.bounds = [0, -1];
+        this.hitAreas.midBlocksDec.bounds = [0, -1];
+        this.hitAreas.midBlocksVal.bounds = [0, -1];
+        this.hitAreas.midBlocksInc.bounds = [0, -1];
+        this.hitAreas.midBlocksAny.bounds = [0, -1];
+        this.hitAreas.lateBlocksDec.bounds = [0, -1];
+        this.hitAreas.lateBlocksVal.bounds = [0, -1];
+        this.hitAreas.lateBlocksInc.bounds = [0, -1];
+        this.hitAreas.lateBlocksAny.bounds = [0, -1];
+        this.hitAreas.textDec.bounds = [0, -1];
+        this.hitAreas.textVal.bounds = [0, -1];
+        this.hitAreas.textInc.bounds = [0, -1];
+        this.hitAreas.textAny.bounds = [0, -1];
+        this.hitAreas.othersDec.bounds = [0, -1];
+        this.hitAreas.othersVal.bounds = [0, -1];
+        this.hitAreas.othersInc.bounds = [0, -1];
+        this.hitAreas.othersAny.bounds = [0, -1];
     }
     syncStrengthMode(node) {
         const currentShowModelAndClip = node.properties[PROP_LABEL_SHOW_STRENGTHS] === PROP_VALUE_SHOW_STRENGTHS_SEPARATE;
@@ -480,6 +560,7 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         var _b, _c;
         this.syncStrengthMode(node);
         const layout = this.getLayoutMetrics();
+        const blockWeightsEnabled = this.areBlockWeightsEnabled();
         const widgetHeight = Math.max(height, layout.totalHeight);
         ctx.save();
         const margin = LORA_WIDGET_MARGIN;
@@ -580,7 +661,7 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         ctx.lineTo(removeButtonX + removeButtonSize - removeInset, removeButtonY + removeInset);
         ctx.stroke();
         ctx.restore();
-        if (!lowQuality) {
+        if (!lowQuality && blockWeightsEnabled) {
             ctx.globalAlpha = app.canvas.editor_alpha * (this.value.on ? 0.8 : 0.45);
             ctx.fillStyle = LiteGraph.WIDGET_SECONDARY_TEXT_COLOR;
             let detailPosX = margin + 22;
@@ -591,17 +672,28 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
             detailPosX = this.drawInlineNumberControl(ctx, "text", "Text", this.value.text ?? 1, detailPosX, bottomRowY, layout.detailRowHeight);
             this.drawInlineNumberControl(ctx, "others", "Others", this.value.others ?? 1, detailPosX, bottomRowY, layout.detailRowHeight);
         }
+        else {
+            this.resetBlockWeightHitAreas();
+        }
         ctx.restore();
     }
     serializeValue(node, index) {
         var _b;
         const v = { ...this.value };
+        v.block_weights_enabled = this.areBlockWeightsEnabled();
         if (!this.showModelAndClip) {
             delete v.strengthTwo;
         }
         else {
             this.value.strengthTwo = (_b = this.value.strengthTwo) !== null && _b !== void 0 ? _b : 1;
             v.strengthTwo = this.value.strengthTwo;
+        }
+        if (!this.areBlockWeightsEnabled()) {
+            delete v.early_blocks;
+            delete v.mid_blocks;
+            delete v.late_blocks;
+            delete v.text;
+            delete v.others;
         }
         return v;
     }
