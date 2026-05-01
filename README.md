@@ -2,7 +2,7 @@
 
 Just whatever nodes i need to make generation convenient and not suck so much.
 
-Opened because Talan wanted lora loader node. Don't expect any of them to keep working, this is not actively maintained repo, and will be guaranteed to work only on my machine.
+Opened because Talan wanted lora loader node. Don't expect any of them to keep working, this is not actively maintained repo, and will not be guaranteed to work even on my machine.
 
 ## Nodes
 
