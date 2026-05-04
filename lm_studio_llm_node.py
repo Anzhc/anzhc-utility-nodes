@@ -123,10 +123,19 @@ def _extract_response_text(content) -> str:
     return str(content)
 
 
-def _extract_stream_chunk_text(payload: dict) -> str:
+def _extract_stream_chunk_delta(payload: dict) -> dict:
     try:
         delta = payload["choices"][0]["delta"]
     except (KeyError, IndexError, TypeError):
+        return {}
+    if isinstance(delta, dict):
+        return delta
+    return {}
+
+
+def _extract_stream_chunk_text(payload: dict) -> str:
+    delta = _extract_stream_chunk_delta(payload)
+    if not delta:
         return ""
 
     content = delta.get("content", "")
@@ -135,6 +144,30 @@ def _extract_stream_chunk_text(payload: dict) -> str:
     if isinstance(content, list):
         return _extract_response_text(content)
     return ""
+
+
+def _extract_stream_chunk_reasoning_text(payload: dict) -> str:
+    delta = _extract_stream_chunk_delta(payload)
+    if not delta:
+        return ""
+
+    reasoning_content = delta.get("reasoning_content", "")
+    if isinstance(reasoning_content, str):
+        return reasoning_content
+    return ""
+
+
+def _iter_utf8_sse_lines(response):
+    # LM Studio omits an SSE charset, so requests defaults to ISO-8859-1.
+    # Decode after byte-line splitting to avoid UTF-8 bytes like E2 9C 85
+    # becoming control characters that split JSON frames.
+    for raw_line in response.iter_lines(decode_unicode=False):
+        if raw_line is None:
+            continue
+        if isinstance(raw_line, bytes):
+            yield raw_line.decode("utf-8", errors="replace")
+        else:
+            yield str(raw_line)
 
 
 class _StreamingRequestState:
@@ -199,6 +232,7 @@ def _call_lm_studio_openai_chat(
     state = _StreamingRequestState()
     result: dict[str, object] = {
         "text_parts": [],
+        "reasoning_chars": 0,
         "error": None,
     }
 
@@ -220,11 +254,9 @@ def _call_lm_studio_openai_chat(
             response.raise_for_status()
             state.bind(session, response)
 
-            for raw_line in response.iter_lines(decode_unicode=True):
+            for raw_line in _iter_utf8_sse_lines(response):
                 if state.is_cancelled():
                     return
-                if raw_line is None:
-                    continue
 
                 line = raw_line.strip()
                 if not line or not line.startswith("data:"):
@@ -245,6 +277,11 @@ def _call_lm_studio_openai_chat(
                 text = _extract_stream_chunk_text(chunk_payload)
                 if text:
                     result["text_parts"].append(text)
+                reasoning_text = _extract_stream_chunk_reasoning_text(chunk_payload)
+                if reasoning_text:
+                    result["reasoning_chars"] = int(result["reasoning_chars"]) + len(
+                        reasoning_text
+                    )
         except requests.RequestException as exc:
             if state.is_cancelled():
                 return
@@ -293,6 +330,11 @@ def _call_lm_studio_openai_chat(
 
     response_text = "".join(result["text_parts"]).strip()
     if not response_text:
+        if int(result.get("reasoning_chars") or 0) > 0:
+            raise RuntimeError(
+                "LM Studio returned reasoning_content chunks but no final assistant content. "
+                "This thinking model may need more generation tokens or thinking disabled in LM Studio."
+            )
         raise RuntimeError("LM Studio returned an empty response.")
     return response_text
 
@@ -433,11 +475,9 @@ def _call_lm_studio_native_chat_with_mcp(
             current_event: str | None = None
             current_data_lines: list[str] = []
 
-            for raw_line in response.iter_lines(decode_unicode=True):
+            for raw_line in _iter_utf8_sse_lines(response):
                 if state.is_cancelled():
                     return
-                if raw_line is None:
-                    continue
 
                 line = raw_line.rstrip("\r")
                 if not line:
