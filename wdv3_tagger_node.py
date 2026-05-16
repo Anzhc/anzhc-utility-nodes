@@ -174,6 +174,15 @@ def _join_batch_tags(tag_strings: list[str]) -> str:
     return "\n".join(tag_strings)
 
 
+def _throw_if_processing_interrupted() -> None:
+    try:
+        import comfy.model_management as model_management
+
+        model_management.throw_exception_if_processing_interrupted()
+    except ImportError:
+        return
+
+
 class AnzhcWDv3Tagger:
     @classmethod
     def INPUT_TYPES(cls):
@@ -244,13 +253,11 @@ class AnzhcWDv3Tagger:
         remove_separator: bool,
         character_tags_first: bool,
     ):
-        import comfy.model_management as model_management
-
         bundle = _ensure_model()
         tag_strings: list[str] = []
 
         for batch_image in image:
-            model_management.throw_exception_if_processing_interrupted()
+            _throw_if_processing_interrupted()
 
             pil_image = _tensor_image_to_pil(batch_image)
             image_array = _preprocess_pil_image(pil_image, bundle.input_size)

@@ -109,6 +109,18 @@ def inject_text_input(session_instruction: str, text_input: str | None) -> str:
     return session_instruction.replace(TEXT_INPUT_POINTER, text_input or "")
 
 
+def append_request_text(session_instruction: str, request_append: str | None) -> str:
+    request_append = str(request_append or "").strip()
+    if not request_append:
+        return str(session_instruction or "")
+
+    session_instruction = str(session_instruction or "")
+    if not session_instruction.strip():
+        return request_append
+
+    return f"{session_instruction.rstrip()}\n\n{request_append}"
+
+
 def _extract_response_text(content) -> str:
     if isinstance(content, str):
         return content
@@ -639,6 +651,14 @@ class AnzhcLMStudioLLM:
                         "tooltip": "Sampling temperature sent to LM Studio. Some loaded models may ignore it.",
                     },
                 ),
+                "request_append": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Optional text appended to the bottom of the user request.",
+                    },
+                ),
             },
             "optional": {
                 "text_input": (
@@ -669,6 +689,7 @@ class AnzhcLMStudioLLM:
     DESCRIPTION = (
         "Calls LM Studio's local OpenAI-compatible chat endpoint. "
         "If Session instruction contains <text_input>, the optional upstream text is inserted there. "
+        "Request append is added to the bottom of the user request when non-empty. "
         "When MCP is connected, uses LM Studio's native /api/v1/chat endpoint with the selected ephemeral MCP server."
     )
 
@@ -683,6 +704,7 @@ class AnzhcLMStudioLLM:
         session_instruction: str,
         model: str,
         temperature: float,
+        request_append: str = "",
         text_input: str = "",
         mcp: dict[str, Any] | None = None,
     ):
@@ -692,7 +714,10 @@ class AnzhcLMStudioLLM:
                 "Load a model in LM Studio, then refresh the node."
             )
 
-        resolved_instruction = inject_text_input(session_instruction, text_input).strip()
+        resolved_instruction = append_request_text(
+            inject_text_input(session_instruction, text_input),
+            request_append,
+        ).strip()
         if not resolved_instruction:
             raise RuntimeError(
                 "Session instruction is empty after applying the optional <text_input> replacement."
