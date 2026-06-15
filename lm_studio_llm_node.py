@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+from io import BytesIO
 import json
 import threading
 import time
@@ -121,6 +123,102 @@ def append_request_text(session_instruction: str, request_append: str | None) ->
     return f"{session_instruction.rstrip()}\n\n{request_append}"
 
 
+def _image_tensor_to_data_url(image) -> str:
+    try:
+        from PIL import Image
+        import torch
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "LM Studio image input requires Pillow and torch to encode ComfyUI IMAGE tensors."
+        ) from exc
+
+    if not torch.is_tensor(image):
+        raise RuntimeError(f"Expected ComfyUI IMAGE tensor, got {type(image)!r}.")
+    if image.ndim != 3:
+        raise RuntimeError(f"Expected single image tensor shaped (H, W, C), got {tuple(image.shape)}.")
+    if image.shape[-1] < 1:
+        raise RuntimeError(f"Expected image tensor with at least one channel, got {tuple(image.shape)}.")
+
+    image_tensor = image.detach().cpu().float().clamp(0.0, 1.0)
+    if image_tensor.shape[-1] == 1:
+        image_tensor = image_tensor.expand(*image_tensor.shape[:-1], 3)
+    elif image_tensor.shape[-1] >= 3:
+        image_tensor = image_tensor[..., :3]
+    else:
+        raise RuntimeError(f"Expected image tensor with 1, 3, or 4 channels, got {tuple(image.shape)}.")
+
+    image_np = (image_tensor * 255.0).round().to(torch.uint8).numpy()
+    pil_image = Image.fromarray(image_np)
+    image_buffer = BytesIO()
+    pil_image.save(image_buffer, format="PNG")
+    encoded = base64.b64encode(image_buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def image_input_to_data_urls(image) -> list[str]:
+    if image is None:
+        return []
+
+    try:
+        import torch
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("LM Studio image input requires torch to inspect ComfyUI IMAGE tensors.") from exc
+
+    if not torch.is_tensor(image):
+        raise RuntimeError(f"Expected ComfyUI IMAGE tensor, got {type(image)!r}.")
+
+    if image.ndim == 3:
+        return [_image_tensor_to_data_url(image)]
+    if image.ndim != 4:
+        raise RuntimeError(
+            f"Expected image tensor shaped (B, H, W, C) or (H, W, C), got {tuple(image.shape)}."
+        )
+
+    return [_image_tensor_to_data_url(image[index]) for index in range(int(image.shape[0]))]
+
+
+def _build_openai_user_content(session_instruction: str, image_data_urls: list[str] | None):
+    if not image_data_urls:
+        return session_instruction
+
+    content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": session_instruction,
+        }
+    ]
+    for data_url in image_data_urls:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": data_url,
+                },
+            }
+        )
+    return content
+
+
+def _build_native_chat_input(session_instruction: str, image_data_urls: list[str] | None):
+    if not image_data_urls:
+        return session_instruction
+
+    input_items: list[dict[str, str]] = [
+        {
+            "type": "message",
+            "content": session_instruction,
+        }
+    ]
+    for data_url in image_data_urls:
+        input_items.append(
+            {
+                "type": "image",
+                "data_url": data_url,
+            }
+        )
+    return input_items
+
+
 def _extract_response_text(content) -> str:
     if isinstance(content, str):
         return content
@@ -225,6 +323,7 @@ def _call_lm_studio_openai_chat(
     system_prompt: str,
     session_instruction: str,
     temperature: float,
+    image_data_urls: list[str] | None = None,
 ) -> str:
     import requests
     import comfy.model_management as model_management
@@ -232,7 +331,12 @@ def _call_lm_studio_openai_chat(
     messages = []
     if system_prompt.strip():
         messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": session_instruction})
+    messages.append(
+        {
+            "role": "user",
+            "content": _build_openai_user_content(session_instruction, image_data_urls),
+        }
+    )
 
     payload = {
         "model": model,
@@ -444,13 +548,14 @@ def _call_lm_studio_native_chat_with_mcp(
     session_instruction: str,
     temperature: float,
     mcp_config: dict[str, Any],
+    image_data_urls: list[str] | None = None,
 ) -> str:
     import requests
     import comfy.model_management as model_management
 
     payload: dict[str, Any] = {
         "model": model,
-        "input": session_instruction,
+        "input": _build_native_chat_input(session_instruction, image_data_urls),
         "temperature": float(temperature),
         "stream": True,
         "store": False,
@@ -571,6 +676,7 @@ def call_lm_studio_chat(
     session_instruction: str,
     temperature: float,
     mcp_config: dict[str, Any] | None = None,
+    image_data_urls: list[str] | None = None,
 ) -> str:
     if mcp_config is None:
         return _call_lm_studio_openai_chat(
@@ -578,6 +684,7 @@ def call_lm_studio_chat(
             system_prompt=system_prompt,
             session_instruction=session_instruction,
             temperature=temperature,
+            image_data_urls=image_data_urls,
         )
 
     return _call_lm_studio_native_chat_with_mcp(
@@ -586,6 +693,7 @@ def call_lm_studio_chat(
         session_instruction=session_instruction,
         temperature=temperature,
         mcp_config=mcp_config,
+        image_data_urls=image_data_urls,
     )
 
 
@@ -670,6 +778,12 @@ class AnzhcLMStudioLLM:
                         "tooltip": "Optional upstream text inserted where <text_input> appears in Session instruction.",
                     },
                 ),
+                "image": (
+                    "IMAGE",
+                    {
+                        "tooltip": "Optional reference image or image batch sent to LM Studio VLMs as PNG data URLs.",
+                    },
+                ),
                 "mcp": (
                     "ANZHC_MCP",
                     {
@@ -690,6 +804,7 @@ class AnzhcLMStudioLLM:
         "Calls LM Studio's local OpenAI-compatible chat endpoint. "
         "If Session instruction contains <text_input>, the optional upstream text is inserted there. "
         "Request append is added to the bottom of the user request when non-empty. "
+        "Optional images are sent as VLM reference inputs. "
         "When MCP is connected, uses LM Studio's native /api/v1/chat endpoint with the selected ephemeral MCP server."
     )
 
@@ -706,6 +821,7 @@ class AnzhcLMStudioLLM:
         temperature: float,
         request_append: str = "",
         text_input: str = "",
+        image=None,
         mcp: dict[str, Any] | None = None,
     ):
         if model == DEFAULT_MODEL_OPTION:
@@ -724,12 +840,14 @@ class AnzhcLMStudioLLM:
             )
 
         resolved_mcp = coerce_mcp_integration_config(mcp) if mcp is not None else None
+        image_data_urls = image_input_to_data_urls(image)
         response_text = call_lm_studio_chat(
             model=model,
             system_prompt=system_prompt or "",
             session_instruction=resolved_instruction,
             temperature=temperature,
             mcp_config=resolved_mcp,
+            image_data_urls=image_data_urls,
         )
         return (response_text,)
 
