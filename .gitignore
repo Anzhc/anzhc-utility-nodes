@@ -12,4 +12,5 @@ Thumbs.db
 *.log
 *.zip
 *.txt
+LLM templates/
 *.ps1

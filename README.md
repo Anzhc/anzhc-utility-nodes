@@ -16,6 +16,7 @@ Opened because Talan wanted lora loader node. Don't expect any of them to keep w
 | `Lora Loader (Anzhc)` | Mixture of rgthree and WAS loaders, with strongly extended functionality. Supports grouped parameter weighting (targetting Anima loras only) and on-the-fly merging (Only SVC method for now(it's just a bit better than generic stacking))|
 | `Resolution (Anzhc)` | Are you tired of writing 832 and 1216 again and again to swap from portrait to landscape? |
 | `LM Studio LLM (Anzhc)` | Allows for usage of locally hosted LLMs from LM studio. Minimal node, i use it just as prompt enhancer. |
+| `LMStudio Pipeline (Anzhc)` | Runs tiered multi-agent workflows from subfolders in `LLM templates`, passing declared dependency outputs to lower-tier agents and returning the final tier-0 response. |
 | `MCP Skills (Anzhc)` | Haven't tested, do whatever you want. |
 | `WDv3 Tagger (Anzhc)` | Haven't actually tested either. Basically plan is to use this for automatic prompting for adetailing, because im lazy. |
 | `Autotagged Tile Conditioning (Anzhc)` | Patches a model for Tiled Diffusion, tags each tile with WDv3, and injects tile-specific positive prompt conditioning while keeping negative conditioning universal. Returns the patched model, global positive conditioning, and tile prompts for inspection. |

@@ -187,7 +187,6 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
     addNewLoraWidget(lora) {
         this.loraWidgetsCounter++;
         const widget = this.addCustomWidget(new PowerLoraLoaderWidget("lora_" + this.loraWidgetsCounter));
-        widget.node = this;
         if (lora)
             widget.setLora(lora);
         if (this.widgetButtonSpacer) {
