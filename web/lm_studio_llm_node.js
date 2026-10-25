@@ -2,7 +2,7 @@ import { app } from "/scripts/app.js";
 import { api } from "/scripts/api.js";
 import { ComfyWidgets } from "/scripts/widgets.js";
 
-const NODE_NAMES = new Set(["Anzhc LM Studio LLM", "Anzhc LM Studio Pipeline"]);
+const NODE_NAMES = new Set(["Anzhc LM Studio LLM", "Anzhc LM Studio Pipeline", "Anzhc LM Studio Gacha"]);
 const MODEL_WIDGET_NAME = "model";
 const FAKE_CHAT_TURNS_WIDGET_NAME = "fake_chat_turns";
 const REFRESH_WIDGET_NAME = "Refresh Models";

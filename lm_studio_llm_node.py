@@ -437,6 +437,7 @@ def _call_lm_studio_openai_chat(
     top_k: int | None = None,
     min_p: float | None = None,
     repeat_penalty: float | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     import requests
     import comfy.model_management as model_management
@@ -467,6 +468,8 @@ def _call_lm_studio_openai_chat(
         payload["min_p"] = float(min_p)
     if repeat_penalty is not None:
         payload["repeat_penalty"] = float(repeat_penalty)
+    if response_format is not None:
+        payload["response_format"] = response_format
 
     state = _StreamingRequestState()
     result: dict[str, object] = {
@@ -828,6 +831,7 @@ def call_lm_studio_chat(
     min_p: float | None = None,
     repeat_penalty: float | None = None,
     reasoning_budget: int | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     if mcp_config is None and reasoning_budget is None:
         return _call_lm_studio_openai_chat(
@@ -844,6 +848,13 @@ def call_lm_studio_chat(
             top_k=top_k,
             min_p=min_p,
             repeat_penalty=repeat_penalty,
+            response_format=response_format,
+        )
+
+    if response_format is not None:
+        raise RuntimeError(
+            "Structured output requires LM Studio's OpenAI-compatible /v1/chat/completions "
+            "endpoint and cannot be used with MCP or a reasoning budget."
         )
 
     if fake_chat_turns:
