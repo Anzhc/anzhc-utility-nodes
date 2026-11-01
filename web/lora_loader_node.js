@@ -123,21 +123,29 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
             this.removeWidget(0);
         this.widgetButtonSpacer = null;
         this.mergeMethodWidget = null;
-        if (info.id != null) {
-            super.configure(info);
+        this.loraWidgetsCounter = 0;
+        super.configure(info);
+        const loraValues = (info.widgets_values || []).filter((value) => value?.lora !== undefined);
+        if (info.properties?.[PROP_LABEL_BLOCK_WEIGHTS] == null) {
+            const savedBlockWeights = loraValues.find((value) => typeof value.block_weights_enabled === "boolean");
+            if (savedBlockWeights) {
+                this.properties[PROP_LABEL_BLOCK_WEIGHTS] = savedBlockWeights.block_weights_enabled;
+            }
+        }
+        if (info.properties?.[PROP_LABEL_SHOW_STRENGTHS] == null && loraValues.some((value) => value.strengthTwo != null)) {
+            this.properties[PROP_LABEL_SHOW_STRENGTHS] = PROP_VALUE_SHOW_STRENGTHS_SEPARATE;
         }
         const mergeMethod = this.resolveConfiguredMergeMethod(info);
         this._tempWidth = this.size[0];
         this._tempHeight = this.size[1];
-        for (const widgetValue of info.widgets_values || []) {
-            if ((widgetValue === null || widgetValue === void 0 ? void 0 : widgetValue.lora) !== undefined) {
-                const widget = this.addNewLoraWidget();
-                widget.value = { ...widgetValue };
-            }
+        for (const widgetValue of loraValues) {
+            const widget = this.addNewLoraWidget();
+            widget.value = { ...widgetValue };
         }
         this.addNonLoraWidgets(mergeMethod);
-        this.size[0] = this.computeSize()[0];
-        this.size[1] = Math.max(this._tempHeight, this.computeSize()[1]);
+        const computed = this.computeSize();
+        this.size[0] = Math.max(this._tempWidth, this.getMinWidth(), computed[0]);
+        this.size[1] = Math.max(this._tempHeight, computed[1]);
     }
     onNodeCreated() {
         var _b;
@@ -187,6 +195,8 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
     addNewLoraWidget(lora) {
         this.loraWidgetsCounter++;
         const widget = this.addCustomWidget(new PowerLoraLoaderWidget("lora_" + this.loraWidgetsCounter));
+        widget.node = this;
+        widget.syncStrengthMode(this);
         if (lora)
             widget.setLora(lora);
         if (this.widgetButtonSpacer) {
@@ -195,6 +205,7 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
         return widget;
     }
     addNonLoraWidgets(mergeMethod = this.getMergeMethod()) {
+        this.properties.merge_method = normalizeMergeMethod(mergeMethod);
         moveArrayItem(this.widgets, this.addCustomWidget(new RgthreeDividerWidget({ marginTop: 4, marginBottom: 0, thickness: 0 })), 0);
         this.mergeMethodWidget = this.addWidget("combo", "merge_method", normalizeMergeMethod(mergeMethod), (value) => {
             this.setMergeMethod(value);
@@ -760,23 +771,14 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         ctx.restore();
     }
     serializeValue(node, index) {
-        var _b;
         const v = { ...this.value };
         v.block_weights_enabled = this.areBlockWeightsEnabled();
         v.merge = this.value.merge === true;
-        if (!this.showModelAndClip) {
+        if (node.properties[PROP_LABEL_SHOW_STRENGTHS] !== PROP_VALUE_SHOW_STRENGTHS_SEPARATE) {
             delete v.strengthTwo;
         }
         else {
-            this.value.strengthTwo = (_b = this.value.strengthTwo) !== null && _b !== void 0 ? _b : 1;
-            v.strengthTwo = this.value.strengthTwo;
-        }
-        if (!this.areBlockWeightsEnabled()) {
-            delete v.early_blocks;
-            delete v.mid_blocks;
-            delete v.late_blocks;
-            delete v.text;
-            delete v.others;
+            v.strengthTwo = this.value.strengthTwo ?? this.value.strength;
         }
         return v;
     }

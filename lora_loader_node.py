@@ -14,7 +14,7 @@ import comfy.weight_adapter
 import folder_paths
 import torch
 
-from .svc_utils import merge_svc_delta_tensors
+from .svc_utils import merge_svc_delta_tensors, merge_svc_lora_factors
 
 
 class _AnyType(str):
@@ -234,34 +234,10 @@ def _get_entry_patch_strength(entry: _LoadedLora, patch_key, strength: float) ->
 
 
 def _tensor_for_svc_merge(tensor: torch.Tensor, multiplier: float = 1.0) -> torch.Tensor:
-    tensor = tensor.detach().to(device="cpu", copy=True)
+    tensor = tensor.detach().to(device="cpu", dtype=torch.float32, copy=True)
     if multiplier != 1.0:
         tensor = tensor * multiplier
     return tensor
-
-
-def _adapter_strength_slots(adapter) -> tuple[int, ...] | None:
-    name = getattr(adapter, "name", "").lower()
-    weights = getattr(adapter, "weights", None)
-
-    if name == "lora":
-        return (0,)
-    if name == "loha":
-        return (0,)
-    if name == "lokr" and weights is not None:
-        if weights[0] is not None:
-            return (0,)
-        if weights[3] is not None:
-            return (3,)
-        if weights[1] is not None:
-            return (1,)
-        if weights[5] is not None:
-            return (5,)
-        return None
-    if name == "glora":
-        return (0, 2)
-
-    return None
 
 
 def _merge_svc_tensor_values(
@@ -270,7 +246,7 @@ def _merge_svc_tensor_values(
     multipliers: list[float],
     ref_tensor: torch.Tensor,
 ) -> torch.Tensor:
-    ref_cpu = ref_tensor.detach().to(device="cpu", copy=True)
+    ref_cpu = _tensor_for_svc_merge(ref_tensor)
     task_tensors: list[torch.Tensor] = []
 
     for value, multiplier in zip(tensor_values, multipliers):
@@ -284,55 +260,55 @@ def _merge_svc_tensor_values(
             )
         task_tensors.append(_tensor_for_svc_merge(value, multiplier))
 
-    return merge_svc_delta_tensors(task_tensors, alpha=0.0).to(dtype=ref_tensor.dtype)
+    return merge_svc_delta_tensors(task_tensors, alpha=0.0)
 
 
 def _merge_svc_adapter_patch(
     patch_key,
     patch_values: list,
     multipliers: list[float],
+    target_weight: torch.Tensor,
 ):
-    ref_adapter = next(
-        (value for value, multiplier in zip(patch_values, multipliers) if value is not None and multiplier != 0.0),
-        None,
-    )
-    if ref_adapter is None:
-        ref_adapter = next((value for value in patch_values if value is not None), None)
-    if ref_adapter is None:
+    active_patches = [value for value, multiplier in zip(patch_values, multipliers) if value is not None and multiplier != 0.0]
+    if not active_patches:
         return None
 
-    strength_slots = _adapter_strength_slots(ref_adapter)
-    if strength_slots is None:
-        raise ValueError(
-            f"SVC LoRA merge does not support adapter type {getattr(ref_adapter, 'name', type(ref_adapter).__name__)!r}"
-        )
+    if isinstance(patch_key, tuple) and len(patch_key) > 1 and patch_key[1] is not None:
+        target_weight = target_weight.narrow(*patch_key[1])
 
-    ref_weights = ref_adapter.weights
-    merged_weights = []
+    if all(isinstance(value, comfy.weight_adapter.LoRAAdapter) and all(item is None for item in value.weights[3:]) for value in active_patches):
+        task_factors = []
+        for value, multiplier in zip(patch_values, multipliers):
+            if value is None or multiplier == 0.0:
+                task_factors.append(None)
+                continue
+            up, down, alpha = value.weights[:3]
+            scale = multiplier * (float(alpha) / down.shape[0] if alpha is not None else 1.0)
+            task_factors.append((_tensor_for_svc_merge(up, scale).flatten(1), _tensor_for_svc_merge(down).flatten(1)))
+        up, down = merge_svc_lora_factors(task_factors)
+        if target_weight.ndim > 2:
+            up = up.reshape(up.shape[0], up.shape[1], *([1] * (target_weight.ndim - 2)))
+            down = down.reshape(down.shape[0], *target_weight.shape[1:])
+        return comfy.weight_adapter.LoRAAdapter(set(), (up, down, None, None, None, None))
 
-    for index, ref_weight in enumerate(ref_weights):
-        if isinstance(ref_weight, torch.Tensor):
-            slot_values: list[torch.Tensor | None] = []
-            for patch_value, multiplier in zip(patch_values, multipliers):
-                if patch_value is None or multiplier == 0.0:
-                    slot_values.append(None)
-                    continue
-                if type(patch_value) is not type(ref_adapter):
-                    raise ValueError(
-                        f"SVC LoRA merge adapter mismatch for {patch_key!r}: "
-                        f"{type(ref_adapter).__name__} vs {type(patch_value).__name__}"
-                    )
-                value = patch_value.weights[index]
-                if value is not None and not isinstance(value, torch.Tensor):
-                    raise ValueError(f"SVC LoRA merge expected tensor adapter weight for {patch_key!r}")
-                slot_values.append(value)
-
-            slot_multipliers = multipliers if index in strength_slots else [1.0] * len(multipliers)
-            merged_weights.append(_merge_svc_tensor_values(patch_key, slot_values, slot_multipliers, ref_weight))
-        else:
-            merged_weights.append(ref_weight)
-
-    return type(ref_adapter)(set(), tuple(merged_weights))
+    # Let ComfyUI expand other adapter types, including their alpha and DoRA math.
+    base = _tensor_for_svc_merge(target_weight)
+    target_name = _get_patch_target_name(patch_key)
+    native_patches = [(multiplier, value, 1.0, None, None)
+                      for value, multiplier in zip(patch_values, multipliers) if value is not None and multiplier != 0.0]
+    merged_shape = comfy.lora.calculate_shape(native_patches, base, target_name)
+    pad_weight = merged_shape != base.shape
+    if pad_weight:
+        base = comfy.lora.pad_tensor_to_shape(base, merged_shape)
+    task_deltas = []
+    for value, multiplier in zip(patch_values, multipliers):
+        if value is None or multiplier == 0.0:
+            task_deltas.append(torch.zeros_like(base))
+            continue
+        patched = comfy.lora.calculate_weight([(multiplier, value, 1.0, None, None)], base.clone(), target_name)
+        task_deltas.append(patched - base)
+    merged_delta = merge_svc_delta_tensors(task_deltas)
+    return ("diff", (merged_delta, {"pad_weight": True})) if pad_weight else ("diff", (merged_delta,))
 
 
 def _normalize_patch_tuple(patch_value) -> tuple[str, tuple]:
@@ -387,6 +363,7 @@ def _merge_svc_patch_values(
     patch_key,
     patch_values: list,
     multipliers: list[float],
+    target_weight: torch.Tensor,
 ):
     ref_patch = next(
         (value for value, multiplier in zip(patch_values, multipliers) if value is not None and multiplier != 0.0),
@@ -397,8 +374,8 @@ def _merge_svc_patch_values(
     if ref_patch is None:
         return None
 
-    if isinstance(ref_patch, comfy.weight_adapter.WeightAdapterBase):
-        return _merge_svc_adapter_patch(patch_key, patch_values, multipliers)
+    if any(isinstance(value, comfy.weight_adapter.WeightAdapterBase) for value, multiplier in zip(patch_values, multipliers) if multiplier != 0.0):
+        return _merge_svc_adapter_patch(patch_key, patch_values, multipliers, target_weight)
     if isinstance(ref_patch, tuple):
         return _merge_svc_diff_patch(patch_key, patch_values, multipliers)
 
@@ -415,26 +392,25 @@ def _merge_svc_lora_patches_for_state_dict(
         patch_keys.update(entry.loaded_patches.keys())
 
     merged_patches = {}
-    with torch.no_grad():
-        for patch_key in patch_keys:
-            target_name = _get_patch_target_name(patch_key)
-            if target_name not in state_dict:
-                continue
+    for patch_key in patch_keys:
+        target_name = _get_patch_target_name(patch_key)
+        if target_name not in state_dict:
+            continue
 
-            patch_values = [entry.loaded_patches.get(patch_key) for entry in entries]
-            multipliers = [
-                _get_entry_patch_strength(entry, patch_key, getattr(entry, strength_attr))
-                if patch_values[index] is not None
-                else 0.0
-                for index, entry in enumerate(entries)
-            ]
-            if all(multiplier == 0.0 for multiplier in multipliers):
-                continue
+        patch_values = [entry.loaded_patches.get(patch_key) for entry in entries]
+        multipliers = [
+            _get_entry_patch_strength(entry, patch_key, getattr(entry, strength_attr))
+            if patch_values[index] is not None
+            else 0.0
+            for index, entry in enumerate(entries)
+        ]
+        if all(multiplier == 0.0 for multiplier in multipliers):
+            continue
 
-            merged_patch = _merge_svc_patch_values(patch_key, patch_values, multipliers)
-            if merged_patch is None:
-                continue
-            merged_patches[patch_key] = merged_patch
+        merged_patch = _merge_svc_patch_values(patch_key, patch_values, multipliers, state_dict[target_name])
+        if merged_patch is None:
+            continue
+        merged_patches[patch_key] = merged_patch
 
     return merged_patches
 

@@ -13,7 +13,7 @@ Opened because Talan wanted lora loader node. Don't expect any of them to keep w
 | `Block Noise Debug (Anzhc)` | Ignore |
 | `No-Noise KSampler (Anzhc)` | Ignore |
 | `Trigger Tag Replace (Anzhc)` | Uses lora names (like ones from WAS lora loader, or mine) and searches for `(trigger)` in name, i.e.: `lora name(trigger) lycoris.safetensors`, if passed text has `TRIGGER` in it, that position will be replaced with all triggers that are found. |
-| `Lora Loader (Anzhc)` | Mixture of rgthree and WAS loaders, with strongly extended functionality. Supports grouped parameter weighting (targetting Anima loras only) and on-the-fly merging (Only SVC method for now(it's just a bit better than generic stacking))|
+| `Lora Loader (Anzhc)` | Mixture of rgthree and WAS loaders, with grouped parameter weighting for Anima and on-the-fly SVC merging of weighted LoRA updates, including different ranks and alpha values. SVC quality depends on the LoRA combination. Hidden weight values and display settings survive saving and copying. |
 | `Resolution (Anzhc)` | Are you tired of writing 832 and 1216 again and again to swap from portrait to landscape? |
 | `LM Studio LLM (Anzhc)` | Allows for usage of locally hosted LLMs from LM studio. Minimal node, i use it just as prompt enhancer. |
 | `LM Studio Neuron Steering (Anzhc)` | Builds per-request layer/neuron controls. Chain it for multiple neurons and connect its output to any LM Studio node. |
@@ -26,6 +26,7 @@ Opened because Talan wanted lora loader node. Don't expect any of them to keep w
 ## Dependency Notes
 
 - `rgthree-comfy` is needed for the custom frontend behavior of `Lora Loader (Anzhc)`.
+- SVC merges standard LoRAs in low rank. Other adapter types expand to full weight updates and can require more RAM and merge time.
 - `LM Studio LLM (Anzhc)` expects LM Studio to be running locally at `http://127.0.0.1:1234`.
 - `LM Studio Gacha (Anzhc)` uses the same local server and its JSON-schema output support. Its token limit applies to each call, including reasoning. The seed controls option selection; identical captions also depend on deterministic model sampling. Based on [Gacha Decoding](https://arxiv.org/abs/2610.01382), Appendix B.
 - Gacha's `system_prompt` applies to every round; `user_prompt` supplies the initial request retained in the conversation. Both replace `<text_input>` with the source text and `<node_info>` with width, height, and aspect ratio. Each DECISION chooses a new question from the request and previous selections and returns `{name, ask, options}` JSON. Python selects an option, then the next round chooses what to elaborate next. All configured decision rounds run, followed by CONCEPTS and FINAL, for `decision_steps + 2` calls. Output formatting rules should apply to FINAL only. The default system prompt includes these stage instructions.

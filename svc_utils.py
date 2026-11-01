@@ -111,6 +111,30 @@ def merge_svc_delta_tensors(
     return calibrate_matrix_delta(normalized_deltas, merged_delta, alpha_eff)
 
 
+def merge_svc_lora_factors(
+    task_factors: list[tuple[torch.Tensor, torch.Tensor] | None],
+    alpha: float = 0.0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Calibrate weight deltas in their joint row/column spaces without expanding them."""
+    alpha = resolve_alpha(alpha, len(task_factors))
+    factors = [pair for pair in task_factors if pair is not None]
+    up_basis, up_coords = torch.linalg.qr(torch.cat([up for up, down in factors], dim=1), mode="reduced")
+    down_basis, down_coords = torch.linalg.qr(torch.cat([down.T for up, down in factors], dim=1), mode="reduced")
+
+    task_deltas = []
+    offset = 0
+    for pair in task_factors:
+        if pair is None:
+            task_deltas.append(up_coords.new_zeros((up_coords.shape[0], down_coords.shape[0])))
+            continue
+        rank = pair[0].shape[1]
+        task_deltas.append(up_coords[:, offset:offset + rank] @ down_coords[:, offset:offset + rank].T)
+        offset += rank
+
+    calibrated = merge_svc_delta_tensors(task_deltas, alpha)
+    return up_basis @ calibrated, down_basis.T.contiguous()
+
+
 def merge_svc_delta_state_dicts(
     delta_state_dicts: list[dict[str, torch.Tensor]],
     alpha: float = 0.0,
