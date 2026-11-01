@@ -21,6 +21,7 @@ LM_STUDIO_BASE_URL = "http://127.0.0.1:1234"
 LM_STUDIO_MODELS_URL = f"{LM_STUDIO_BASE_URL}/v1/models"
 LM_STUDIO_CHAT_URL = f"{LM_STUDIO_BASE_URL}/v1/chat/completions"
 LM_STUDIO_NATIVE_CHAT_URL = f"{LM_STUDIO_BASE_URL}/api/v1/chat"
+NEURON_MODEL_PREFIX = "Neuron API: "
 LM_STUDIO_USER_AGENT = "ComfyUI-Anzhc-LM-Studio/1.0"
 TEXT_INPUT_POINTER = "<text_input>"
 NODE_INFO_POINTER = "<node_info>"
@@ -96,8 +97,7 @@ def fetch_lm_studio_models(timeout: float = 5.0, *, force_refresh: bool = False)
     ):
         return list(cached_models)
 
-    payload = _request_json(LM_STUDIO_MODELS_URL, timeout=timeout)
-    model_ids = _extract_model_ids(payload)
+    model_ids = _extract_model_ids(_request_json(LM_STUDIO_MODELS_URL, timeout=timeout))
 
     _MODEL_CACHE["models"] = list(model_ids)
     _MODEL_CACHE["expires_at"] = now + MODEL_CACHE_TTL_SECONDS
@@ -198,6 +198,25 @@ def parse_fake_chat_turns(fake_chat_turns: str | None) -> list[dict[str, str]]:
         turns.append({"user": user_text, "assistant": assistant_text})
 
     return turns
+
+
+def neuron_steering_input():
+    return ("STRING", {
+        "default": "[]",
+        "multiline": True,
+        "forceInput": True,
+        "tooltip": "Per-request neuron settings as a JSON array, or connect LM Studio Neuron Steering. Per-request activation steering through LM Studio native API. Requires the installed activation-enabled runtime. [] clears steering.",
+    })
+
+
+def parse_neuron_steering(steering: str | None) -> list[dict[str, Any]]:
+    try:
+        entries = json.loads(steering or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Neuron steering must be a JSON array of layer/neuron settings.") from exc
+    if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
+        raise RuntimeError("Neuron steering must be a JSON array of objects.")
+    return entries
 
 
 def _image_tensor_to_data_url(image) -> str:
@@ -438,6 +457,7 @@ def _call_lm_studio_openai_chat(
     min_p: float | None = None,
     repeat_penalty: float | None = None,
     response_format: dict[str, Any] | None = None,
+    steering: list[dict[str, Any]] | None = None,
 ) -> str:
     import requests
     import comfy.model_management as model_management
@@ -456,6 +476,8 @@ def _call_lm_studio_openai_chat(
         "temperature": float(temperature),
         "stream": True,
     }
+    if steering is not None:
+        payload["steering"] = steering
     if seed is not None:
         payload["seed"] = int(seed)
     if max_tokens is not None:
@@ -681,6 +703,7 @@ def _call_lm_studio_native_chat(
     repeat_penalty: float | None = None,
     max_output_tokens: int | None = None,
     reasoning_budget: int | None = None,
+    steering: list[dict[str, Any]] | None = None,
 ) -> str:
     import requests
     import comfy.model_management as model_management
@@ -692,6 +715,8 @@ def _call_lm_studio_native_chat(
         "stream": True,
         "store": False,
     }
+    if steering is not None:
+        payload["steering"] = steering
     if mcp_config is not None:
         payload["integrations"] = [mcp_config]
     if system_prompt.strip():
@@ -832,7 +857,19 @@ def call_lm_studio_chat(
     repeat_penalty: float | None = None,
     reasoning_budget: int | None = None,
     response_format: dict[str, Any] | None = None,
+    steering: str | None = None,
 ) -> str:
+    entries = parse_neuron_steering(steering)
+    if entries:
+        try:
+            capabilities = _request_json(f"{LM_STUDIO_BASE_URL}/v1/steering")
+        except (RuntimeError, TimeoutError) as exc:
+            raise RuntimeError("LM Studio's native steering patch is not active. Restart LM Studio after installation; app updates require reapplying the patch.") from exc
+        if capabilities.get("version") != 1 or capabilities.get("backend") != "lmstudio-managed":
+            raise RuntimeError("LM Studio did not advertise the native activation steering extension.")
+    model = model.removeprefix(NEURON_MODEL_PREFIX)
+    if model == "zwielicht-neuron":
+        model = "zwielicht-27b"
     if mcp_config is None and reasoning_budget is None:
         return _call_lm_studio_openai_chat(
             model=model,
@@ -849,6 +886,7 @@ def call_lm_studio_chat(
             min_p=min_p,
             repeat_penalty=repeat_penalty,
             response_format=response_format,
+            steering=entries if steering is not None else None,
         )
 
     if response_format is not None:
@@ -880,6 +918,7 @@ def call_lm_studio_chat(
         repeat_penalty=repeat_penalty,
         max_output_tokens=max_output_tokens,
         reasoning_budget=reasoning_budget,
+        steering=entries if steering is not None else None,
     )
 
 
@@ -931,7 +970,7 @@ class AnzhcLMStudioLLM:
                     models,
                     {
                         "default": models[0],
-                        "tooltip": f"Active LM Studio model from {LM_STUDIO_MODELS_URL}.",
+                        "tooltip": "LM Studio-managed model. Steering applies to this loaded instance.",
                     },
                 ),
                 "temperature": (
@@ -1064,6 +1103,7 @@ class AnzhcLMStudioLLM:
                 ),
             },
             "optional": {
+                "steering": neuron_steering_input(),
                 "text_input": (
                     "STRING",
                     {
@@ -1133,6 +1173,7 @@ class AnzhcLMStudioLLM:
         width: int = 1024,
         height: int = 1024,
         reasoning_budget: int = 0,
+        steering: str | None = None,
     ):
         if model == DEFAULT_MODEL_OPTION:
             raise RuntimeError(
@@ -1178,6 +1219,7 @@ class AnzhcLMStudioLLM:
             "max_tokens": output_token_limit,
             "mcp_config": resolved_mcp,
             "image_data_urls": image_data_urls,
+            "steering": steering,
         }
         if reasoning_budget > 0:
             call_kwargs["reasoning_budget"] = reasoning_budget
@@ -1189,10 +1231,42 @@ class AnzhcLMStudioLLM:
         return (response_text,)
 
 
+class AnzhcLMStudioNeuronSteering:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "enabled": ("BOOLEAN", {"default": True}),
+                "layer": ("INT", {"default": 34, "min": 0, "max": 2147483647}),
+                "neuron": ("INT", {"default": 3838, "min": 0, "max": 2147483647}),
+                "mode": (["add", "multiply", "set"],),
+                "value": ("FLOAT", {"default": 0.0, "min": -1000000.0, "max": 1000000.0, "step": 0.05}),
+                "unit": (["residual_norm", "raw"],),
+            },
+            "optional": {"steering": neuron_steering_input()},
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("steering",)
+    FUNCTION = "configure"
+    CATEGORY = "anzhc/utility"
+    DESCRIPTION = "Builds per-request neuron settings for LM Studio native inference. Chain entries for multiple neurons. Targets and doses can change between requests; disabled entries produce baseline inference."
+
+    def configure(self, enabled, layer, neuron, mode, value, unit, steering="[]"):
+        entries = parse_neuron_steering(steering)
+        if enabled:
+            if mode == "multiply":
+                unit = "raw"
+            entries.append({"layer": layer, "neuron": neuron, "mode": mode, "value": value, "unit": unit})
+        return (json.dumps(entries),)
+
+
 NODE_CLASS_MAPPINGS = {
     "Anzhc LM Studio LLM": AnzhcLMStudioLLM,
+    "Anzhc LM Studio Neuron Steering": AnzhcLMStudioNeuronSteering,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Anzhc LM Studio LLM": "LM Studio LLM (Anzhc)",
+    "Anzhc LM Studio Neuron Steering": "LM Studio Neuron Steering (Anzhc)",
 }

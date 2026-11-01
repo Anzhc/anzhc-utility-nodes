@@ -6,6 +6,7 @@ from .lm_studio_llm_node import (
     LM_STUDIO_MODELS_URL,
     call_lm_studio_chat,
     get_lm_studio_model_options,
+    neuron_steering_input,
     image_input_to_data_urls,
     inject_node_info,
     inject_text_input,
@@ -125,6 +126,7 @@ def _generate_gacha(
     width: int = 1024,
     height: int = 1024,
     image_data_urls: list[str] | None = None,
+    steering: str | None = None,
 ) -> tuple[str, str]:
     rng = random.Random(seed)
     system_prompt = inject_node_info(inject_text_input(system_prompt, text_input), width, height)
@@ -142,6 +144,7 @@ def _generate_gacha(
         "seed": seed,
         "max_tokens": output_token_limit,
         "image_data_urls": image_data_urls,
+        "steering": steering,
     }
     turns = []
     rounds = []
@@ -251,6 +254,7 @@ class AnzhcLMStudioGacha:
                                    "tooltip": "Generation height inserted at <node_info>."}),
             },
             "optional": {
+                "steering": neuron_steering_input(),
                 "image": ("IMAGE", {
                     "tooltip": "Reference image or image batch used in every round. Requires a vision-capable LM Studio model.",
                 }),
@@ -279,7 +283,7 @@ class AnzhcLMStudioGacha:
     def generate(
         self, model, temperature, seed, decision_steps, options_per_step, output_token_limit, text_input,
         system_prompt=DEFAULT_SYSTEM_PROMPT, user_prompt=DEFAULT_USER_PROMPT, width=1024, height=1024,
-        image=None,
+        image=None, steering=None,
     ):
         if model == DEFAULT_MODEL_OPTION:
             raise RuntimeError(
@@ -299,6 +303,7 @@ class AnzhcLMStudioGacha:
             width=int(width),
             height=int(height),
             image_data_urls=image_input_to_data_urls(image),
+            steering=steering,
         )
 
 
