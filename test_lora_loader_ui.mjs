@@ -31,10 +31,11 @@ class BaseNode {
             properties: this.properties,
             flags: this.flags,
             size: this.size,
-            widgets_values: this.widgets.map((widget, index) => widget.serializeValue?.(this, index) ?? widget.value),
+            widgets_values: this.widgets.map((widget) => widget.value ?? null),
         });
     }
     addCustomWidget(widget) {
+        Object.defineProperty(widget, "node", { get: () => this });
         this.widgets.push(widget);
         return widget;
     }
@@ -75,6 +76,62 @@ function createNode() {
 function loras(node) {
     return node.widgets.filter((widget) => widget.name?.startsWith("lora_"));
 }
+
+async function serializePrompt(node) {
+    const executableNode = { node, id: String(node.id), widgets: node.widgets };
+    const inputs = {};
+    for (const [index, widget] of executableNode.widgets.entries()) {
+        inputs[widget.name] = widget.serializeValue ? await widget.serializeValue(executableNode, index) : widget.value;
+    }
+    return { inputs };
+}
+
+test("prompt export accepts execution wrappers without node properties", async () => {
+    const node = createNode();
+    const widget = node.addNewLoraWidget("test.safetensors");
+    Object.assign(widget.value, { strength: 0.7, merge: true, early_blocks: 0.4 });
+    node.toggleBlockWeights();
+    node.setMergeMethod("svc");
+    const prompt = await serializePrompt(node);
+    assert.equal(prompt.inputs.merge_method, "svc");
+    assert.equal(prompt.inputs.lora_1.strength, 0.7);
+    assert.equal(prompt.inputs.lora_1.block_weights_enabled, false);
+    assert.equal(prompt.inputs.lora_1.merge, true);
+    assert.equal(prompt.inputs.lora_1.early_blocks, 0.4);
+    assert.equal(Object.hasOwn(prompt.inputs.lora_1, "strengthTwo"), false);
+});
+
+test("prompt export reads the owner's strength mode before a redraw", async () => {
+    const node = createNode();
+    const widget = node.addNewLoraWidget("test.safetensors");
+    Object.assign(widget.value, { strength: 0.7, strengthTwo: 0.25 });
+    node.properties["Show Strengths"] = "Separate Model & Clip";
+    const before = { ...widget.value };
+    const prompt = await serializePrompt(node);
+    assert.equal(prompt.inputs.lora_1.strengthTwo, 0.25);
+    assert.deepEqual(widget.value, before);
+    node.properties["Show Strengths"] = "Single Strength";
+    assert.equal(Object.hasOwn((await serializePrompt(node)).inputs.lora_1, "strengthTwo"), false);
+});
+
+test("existing workflow nodes load with ComfyUI's getter-only widget owner", () => {
+    const node = createNode();
+    node.configure({
+        id: 42,
+        properties: { "Show Strengths": "Single Strength", "Block Weights Enabled": false, merge_method: "svc" },
+        widgets_values: [{}, "svc", { type: "PowerLoraLoaderHeaderWidget" },
+            { on: true, merge: true, lora: "existing.safetensors", strength: 0.7, strengthTwo: null,
+                early_blocks: 0.4, mid_blocks: 1.3, late_blocks: 1, text: 0.2, others: 1 }, {}, ""],
+    });
+    const widget = loras(node)[0];
+    assert.equal(Object.getOwnPropertyDescriptor(widget, "node").set, undefined);
+    assert.equal(widget.node, node);
+    assert.equal(node.areBlockWeightsEnabled(), false);
+    assert.equal(node.getMergeMethod(), "svc");
+    assert.equal(widget.value.lora, "existing.safetensors");
+    assert.equal(widget.value.early_blocks, 0.4);
+    assert.equal(widget.getLayoutMetrics().totalHeight, 32);
+});
 
 test("copy/paste without an id preserves hidden weights, flags, strengths and SVC toggles", () => {
     const node = createNode();

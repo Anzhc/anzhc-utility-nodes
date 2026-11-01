@@ -195,7 +195,6 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
     addNewLoraWidget(lora) {
         this.loraWidgetsCounter++;
         const widget = this.addCustomWidget(new PowerLoraLoaderWidget("lora_" + this.loraWidgetsCounter));
-        widget.node = this;
         widget.syncStrengthMode(this);
         if (lora)
             widget.setLora(lora);
@@ -771,10 +770,11 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         ctx.restore();
     }
     serializeValue(node, index) {
+        const owner = this.node ?? node;
         const v = { ...this.value };
         v.block_weights_enabled = this.areBlockWeightsEnabled();
         v.merge = this.value.merge === true;
-        if (node.properties[PROP_LABEL_SHOW_STRENGTHS] !== PROP_VALUE_SHOW_STRENGTHS_SEPARATE) {
+        if (owner.properties[PROP_LABEL_SHOW_STRENGTHS] !== PROP_VALUE_SHOW_STRENGTHS_SEPARATE) {
             delete v.strengthTwo;
         }
         else {
