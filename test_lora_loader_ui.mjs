@@ -101,6 +101,26 @@ test("prompt export accepts execution wrappers without node properties", async (
     assert.equal(Object.hasOwn(prompt.inputs.lora_1, "strengthTwo"), false);
 });
 
+test("average merge exports and restores its method and row selection", async () => {
+    const node = createNode();
+    const widget = node.addNewLoraWidget("test.safetensors");
+    Object.assign(widget.value, { strength: 0.7, merge: true });
+    node.setMergeMethod("average");
+    assert.equal(node.isMergeEnabled(), true);
+    assert.equal(widget.isMergeEnabled(), true);
+    assert.ok(node.mergeMethodWidget.options.values.includes("average"));
+    const prompt = await serializePrompt(node);
+    assert.equal(prompt.inputs.merge_method, "average");
+    assert.equal(prompt.inputs.lora_1.merge, true);
+    assert.equal(prompt.inputs.lora_1.strength, 0.7);
+    const restored = createNode();
+    restored.configure(node.serialize());
+    assert.equal(restored.getMergeMethod(), "average");
+    assert.equal(loras(restored)[0].value.merge, true);
+    restored.setMergeMethod("none");
+    assert.equal(restored.isMergeEnabled(), false);
+});
+
 test("prompt export reads the owner's strength mode before a redraw", async () => {
     const node = createNode();
     const widget = node.addNewLoraWidget("test.safetensors");

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 import os
 import re
@@ -73,8 +73,9 @@ _TEXT_KEY_FRAGMENTS = (
     ".txt.",
 )
 _MERGE_METHOD_NONE = "none"
+_MERGE_METHOD_AVERAGE = "average"
 _MERGE_METHOD_SVC = "svc"
-_MERGE_METHODS = (_MERGE_METHOD_NONE, _MERGE_METHOD_SVC)
+_MERGE_METHODS = (_MERGE_METHOD_NONE, _MERGE_METHOD_AVERAGE, _MERGE_METHOD_SVC)
 
 
 @dataclass
@@ -382,6 +383,37 @@ def _merge_svc_patch_values(
     raise ValueError(f"SVC LoRA merge does not support patch value for {patch_key!r}: {type(ref_patch).__name__}")
 
 
+def _svc_patches_squared_norm(patches: list, target_weight: torch.Tensor, target_name: str) -> float:
+    patches = [patch for patch in patches if patch[0] != 0.0]
+    if not patches:
+        return 0.0
+
+    if all(isinstance(value, comfy.weight_adapter.LoRAAdapter) and all(item is None for item in value.weights[3:])
+           and strength_model == 1.0 and (offset is None or offset[0] == 0) and function is None
+           for _, value, strength_model, offset, function in patches):
+        ups, downs = [], []
+        for multiplier, value, _, offset, _ in patches:
+            up, down, alpha = value.weights[:3]
+            scale = multiplier * (float(alpha) / down.shape[0] if alpha is not None else 1.0)
+            up = _tensor_for_svc_merge(up, scale).flatten(1)
+            down = _tensor_for_svc_merge(down).flatten(1)
+            if offset is not None:
+                up = torch.nn.functional.pad(up, (0, 0, offset[1], target_weight.shape[0] - offset[1] - offset[2]))
+            ups.append(up)
+            downs.append(down)
+        up = torch.cat(ups, dim=1)
+        down = torch.cat(downs, dim=0)
+        _, coordinates = torch.linalg.qr(down.T, mode="r")
+        return (up @ coordinates.T).square().sum().item()
+
+    base = _tensor_for_svc_merge(target_weight)
+    shape = comfy.lora.calculate_shape(patches, base, target_name)
+    if shape != base.shape:
+        base = comfy.lora.pad_tensor_to_shape(base, shape)
+    delta = comfy.lora.calculate_weight(patches, base.clone(), target_name) - base
+    return delta.square().sum().item()
+
+
 def _merge_svc_lora_patches_for_state_dict(
     entries: list[_LoadedLora],
     state_dict: dict,
@@ -411,6 +443,34 @@ def _merge_svc_lora_patches_for_state_dict(
         if merged_patch is None:
             continue
         merged_patches[patch_key] = merged_patch
+
+    average_patches, output_patches = {}, {}
+    for entry in entries:
+        for patch_key, patch_value in entry.loaded_patches.items():
+            if patch_key not in merged_patches:
+                continue
+            target_name = _get_patch_target_name(patch_key)
+            strength = _get_entry_patch_strength(entry, patch_key, getattr(entry, strength_attr)) / len(entries)
+            offset = patch_key[1] if isinstance(patch_key, tuple) else None
+            function = patch_key[2] if isinstance(patch_key, tuple) and len(patch_key) > 2 else None
+            average_patches.setdefault(target_name, []).append((strength, patch_value, 1.0, offset, function))
+    for patch_key, patch_value in merged_patches.items():
+        target_name = _get_patch_target_name(patch_key)
+        offset = patch_key[1] if isinstance(patch_key, tuple) else None
+        function = patch_key[2] if isinstance(patch_key, tuple) and len(patch_key) > 2 else None
+        output_patches.setdefault(target_name, []).append((1.0, patch_value, 1.0, offset, function))
+
+    average_squared_norm = sum(_svc_patches_squared_norm(patches, state_dict[key], key) for key, patches in average_patches.items())
+    merged_squared_norm = sum(_svc_patches_squared_norm(patches, state_dict[key], key) for key, patches in output_patches.items())
+
+    if merged_squared_norm > 0.0:
+        scale = (average_squared_norm / merged_squared_norm)**0.5
+        for patch_key, patch in merged_patches.items():
+            if isinstance(patch, comfy.weight_adapter.LoRAAdapter):
+                merged_patches[patch_key] = comfy.weight_adapter.LoRAAdapter(set(), (patch.weights[0] * scale, *patch.weights[1:]))
+            else:
+                patch_type, data = _normalize_patch_tuple(patch)
+                merged_patches[patch_key] = (patch_type, (data[0] * scale, *data[1:]))
 
     return merged_patches
 
@@ -470,8 +530,8 @@ class AnzhcLoraLoader:
     RETURN_NAMES = ("MODEL", "CLIP", "NAME_STRING")
     FUNCTION = "load_loras"
     DESCRIPTION = (
-        "Exact rgthree-style Power LoRA Loader behavior with an additional NAME_STRING output "
-        "containing enabled LoRA names joined by commas."
+        "Load LoRAs with grouped weights and enabled LoRA names. Average divides marked LoRA strengths "
+        "by their count; SVC merges their weighted updates and matches the average's total update magnitude."
     )
 
     def __init__(self):
@@ -614,11 +674,14 @@ class AnzhcLoraLoader:
         merge_method = _normalize_merge_method(kwargs.get("merge_method", _MERGE_METHOD_NONE))
         active_loras, active_names = self._collect_loras(model, clip, kwargs)
 
-        marked_loras = [entry for entry in active_loras if merge_method == _MERGE_METHOD_SVC and entry.merge]
-        should_merge = len(marked_loras) >= 2
+        marked_loras = [entry for entry in active_loras if merge_method != _MERGE_METHOD_NONE and entry.merge]
+        should_merge = merge_method == _MERGE_METHOD_SVC and len(marked_loras) >= 2
         merged_loras_applied = False
 
         for entry in active_loras:
+            if merge_method == _MERGE_METHOD_AVERAGE and entry.merge:
+                entry = replace(entry, strength_model=entry.strength_model / len(marked_loras),
+                                strength_clip=entry.strength_clip / len(marked_loras))
             if should_merge and entry.merge:
                 if not merged_loras_applied:
                     model, clip = self._apply_svc_merged_loras(model, clip, marked_loras)

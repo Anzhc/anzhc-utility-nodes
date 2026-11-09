@@ -16,7 +16,6 @@ Opened because Talan wanted lora loader node. Don't expect any of them to keep w
 | `Lora Loader (Anzhc)` | Mixture of rgthree and WAS loaders, with grouped parameter weighting for Anima and on-the-fly SVC merging of weighted LoRA updates, including different ranks and alpha values. SVC quality depends on the LoRA combination. Hidden weight values and display settings survive saving and copying. |
 | `Resolution (Anzhc)` | Are you tired of writing 832 and 1216 again and again to swap from portrait to landscape? |
 | `LM Studio LLM (Anzhc)` | Allows for usage of locally hosted LLMs from LM studio. Minimal node, i use it just as prompt enhancer. |
-| `LM Studio Neuron Steering (Anzhc)` | Builds per-request layer/neuron controls. Chain it for multiple neurons and connect its output to any LM Studio node. |
 | `LMStudio Pipeline (Anzhc)` | Runs tiered multi-agent workflows from subfolders in `LLM templates`, passing declared dependency outputs to lower-tier agents and returning the final tier-0 response. |
 | `LM Studio Gacha (Anzhc)` | Expands image requests with adaptive model-planned visual decisions and seeded random option selection in one conversation. Editable system and user prompts default to Anima tags and description. Defaults to six decisions, 32 options per decision, eight overall concepts, and eight local LM Studio calls. |
 | `MCP Skills (Anzhc)` | Haven't tested, do whatever you want. |
@@ -35,14 +34,6 @@ Opened because Talan wanted lora loader node. Don't expect any of them to keep w
 - `MCP Skills (Anzhc)` uses the `mcp` package listed in `requirements.txt`.
 - `WDv3 Tagger (Anzhc)` requires `onnxruntime` and `huggingface_hub`. The WDv3 model files are downloaded from Hugging Face on first use.
 - `Autotagged Tile Conditioning (Anzhc)` requires `ComfyUI-TiledDiffusion` plus the WDv3 Tagger dependencies above. `SpotDiffusion` is not supported because its shifted windows do not map cleanly to static tile tags.
-
-## Neuron steering
-
-Neuron steering uses LM Studio's native API on port 1234 and its managed model instance. The local activation-enabled runtime patch adds a `steering` array to `/v1/chat/completions` and `/api/v1/chat`; the model remains visible in Loaded Models and retains its load configuration. Requests do not reload an already-loaded checkpoint. The old companion inference server is no longer used.
-
-Connect `LM Studio Neuron Steering (Anzhc)` to LLM, Pipeline, or Gacha. Select any complete dense Qwen `qwen35` GGUF checkpoint. Layer and neuron bounds come from that checkpoint. Set `add`, `multiply`, or `set`, a value, and `raw` or `residual_norm` units. Multiply uses raw units. Chain nodes for multiple distinct coordinates. Change targets between queued executions; disable all entries or send `[]` for baseline inference. All calls in a Pipeline/Gacha execution use that execution's settings. Native batching and prompt caches keep steered activations isolated from other requests.
-
-The local LM Studio app/runtime patch is version-specific. App or runtime updates may require reapplying it. Active steering fails explicitly if the selected runtime does not advertise activation support. Installation and rollback details are in `G:\LMStudio\native-steering\README.md`.
 
 ## Acknowledgements
 

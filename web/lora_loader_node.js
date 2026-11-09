@@ -16,8 +16,9 @@ const PROP_LABEL_SHOW_STRENGTHS_STATIC = `@${PROP_LABEL_SHOW_STRENGTHS}`;
 const PROP_VALUE_SHOW_STRENGTHS_SINGLE = "Single Strength";
 const PROP_VALUE_SHOW_STRENGTHS_SEPARATE = "Separate Model & Clip";
 const MERGE_METHOD_NONE = "none";
+const MERGE_METHOD_AVERAGE = "average";
 const MERGE_METHOD_SVC = "svc";
-const MERGE_METHOD_VALUES = [MERGE_METHOD_NONE, MERGE_METHOD_SVC];
+const MERGE_METHOD_VALUES = [MERGE_METHOD_NONE, MERGE_METHOD_AVERAGE, MERGE_METHOD_SVC];
 const NODE_CLASS_TYPE = "Anzhc Lora Loader";
 const LORA_WIDGET_MARGIN = 10;
 const LORA_WIDGET_INNER_MARGIN = LORA_WIDGET_MARGIN * 0.33;
@@ -164,11 +165,11 @@ class AnzhcPowerLoraLoader extends RgthreeBaseServerNode {
         var _b;
         return normalizeMergeMethod(((_b = this.mergeMethodWidget) === null || _b === void 0 ? void 0 : _b.value) || this.properties.merge_method);
     }
-    isSvcMergeEnabled() {
-        return this.getMergeMethod() === MERGE_METHOD_SVC;
+    isMergeEnabled() {
+        return this.getMergeMethod() !== MERGE_METHOD_NONE;
     }
     getMinWidth() {
-        return getPowerLoraMinWidth(this.properties[PROP_LABEL_SHOW_STRENGTHS] === PROP_VALUE_SHOW_STRENGTHS_SEPARATE, this.areBlockWeightsEnabled(), this.isSvcMergeEnabled());
+        return getPowerLoraMinWidth(this.properties[PROP_LABEL_SHOW_STRENGTHS] === PROP_VALUE_SHOW_STRENGTHS_SEPARATE, this.areBlockWeightsEnabled(), this.isMergeEnabled());
     }
     onResize(size) {
         size[0] = Math.max(size[0], this.getMinWidth());
@@ -519,13 +520,13 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         var _b;
         return ((_b = this.node) === null || _b === void 0 ? void 0 : _b.areBlockWeightsEnabled()) !== false;
     }
-    isSvcMergeEnabled() {
+    isMergeEnabled() {
         var _b;
-        return ((_b = this.node) === null || _b === void 0 ? void 0 : _b.isSvcMergeEnabled()) === true;
+        return ((_b = this.node) === null || _b === void 0 ? void 0 : _b.isMergeEnabled()) === true;
     }
     computeSize(width) {
         const layout = this.getLayoutMetrics();
-        const minWidth = getPowerLoraMinWidth(this.showModelAndClip === true, this.areBlockWeightsEnabled(), this.isSvcMergeEnabled());
+        const minWidth = getPowerLoraMinWidth(this.showModelAndClip === true, this.areBlockWeightsEnabled(), this.isMergeEnabled());
         return [Math.max(width || minWidth, minWidth), layout.totalHeight];
     }
     getLayoutMetrics() {
@@ -660,14 +661,14 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
             ctx.globalAlpha = app.canvas.editor_alpha * 0.4;
         }
         ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-        if (this.isSvcMergeEnabled()) {
+        if (this.isMergeEnabled()) {
             const mergeBounds = drawTogglePart(ctx, {
                 posX,
                 posY: topRowY,
                 height: layout.topRowHeight,
                 value: this.value.merge,
             });
-            const mergeLabel = "SVC";
+            const mergeLabel = node.getMergeMethod() === MERGE_METHOD_AVERAGE ? "AVG" : "SVC";
             const mergeLabelX = posX + mergeBounds[1] + innerMargin;
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";

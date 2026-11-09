@@ -9,7 +9,6 @@ from .lm_studio_llm_node import (
     LM_STUDIO_MODELS_URL,
     call_lm_studio_chat,
     get_lm_studio_model_options,
-    neuron_steering_input,
 )
 
 
@@ -242,7 +241,6 @@ def execute_pipeline(
     temperature: float,
     seed: int,
     text_input: str,
-    steering: str | None = None,
 ) -> str:
     agents = pipeline["agents"]
     agents_by_id = {agent["id"]: agent for agent in agents}
@@ -264,7 +262,6 @@ def execute_pipeline(
                 temperature=temperature,
                 seed=seed,
                 max_tokens=agent["max_output_tokens"],
-                steering=steering,
             )
         except Exception as exc:
             try:
@@ -300,7 +297,7 @@ class AnzhcLMStudioPipeline:
                     models,
                     {
                         "default": models[0],
-                        "tooltip": "LM Studio model, or a Neuron API model for per-request steering.",
+                        "tooltip": f"Active LM Studio model from {LM_STUDIO_MODELS_URL}.",
                     },
                 ),
                 "temperature": (
@@ -331,8 +328,7 @@ class AnzhcLMStudioPipeline:
                         "tooltip": "Required source text inserted at <text_input> for every pipeline agent.",
                     },
                 ),
-            },
-            "optional": {"steering": neuron_steering_input()},
+            }
         }
 
     RETURN_TYPES = ("STRING",)
@@ -357,7 +353,6 @@ class AnzhcLMStudioPipeline:
         temperature: float,
         seed: int,
         text_input: str,
-        steering: str | None = None,
     ):
         if model == DEFAULT_MODEL_OPTION:
             raise RuntimeError(
@@ -372,7 +367,6 @@ class AnzhcLMStudioPipeline:
             temperature=float(temperature),
             seed=int(seed),
             text_input=str(text_input or ""),
-            steering=steering,
         )
         return (response,)
 

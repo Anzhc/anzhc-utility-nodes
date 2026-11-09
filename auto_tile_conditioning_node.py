@@ -89,6 +89,7 @@ def _load_tiled_diffusion_module():
 class AutotaggedDiffusionMixin:
     def configure_autotagging(self, base_model, tile_conditionings):
         self.anzhc_base_model = base_model
+        self.anzhc_is_moss = base_model.model_config.unet_config.get("image_model") == "moss_image"
         self.anzhc_tile_conditionings = tile_conditionings
         self.anzhc_tile_model_cond_cache = {}
         self.anzhc_warned_tile_count_mismatch = False
@@ -105,8 +106,9 @@ class AutotaggedDiffusionMixin:
         params["device"] = x_in.device
         params["noise"] = x_in
         if len(x_in.shape) >= 4:
-            params["width"] = params.get("width", x_in.shape[-1] * 8)
-            params["height"] = params.get("height", x_in.shape[-2] * 8)
+            compression = self.anzhc_base_model.latent_format.spacial_downscale_ratio
+            params["width"] = params.get("width", x_in.shape[-1] * compression)
+            params["height"] = params.get("height", x_in.shape[-2] * compression)
         params["prompt_type"] = params.get("prompt_type", "positive")
 
         model_conds = self.anzhc_base_model.extra_conds(**params)
@@ -153,7 +155,7 @@ class AutotaggedDiffusionMixin:
             return c_tile
 
         positive_offsets = [idx for idx, cond_type in enumerate(cond_or_uncond) if cond_type == 0]
-        if not positive_offsets and rows_per_tile == 1:
+        if not cond_or_uncond and rows_per_tile == 1:
             positive_offsets = [0]
         if not positive_offsets:
             return c_tile
@@ -233,12 +235,58 @@ class AutotaggedDiffusionMixin:
 
         return out
 
+    def _apply_moss_tile_conditioning(self, model_function, x_tile, t_tile, c_tile, x_in, cond_or_uncond, batch_id):
+        cond_or_uncond = cond_or_uncond or [0]
+        if 0 not in cond_or_uncond:
+            return model_function(x_tile, t_tile, **c_tile)
+
+        rows_per_tile = x_in.shape[0]
+        batch_size = rows_per_tile // len(cond_or_uncond)
+        tile_start = self._tile_start_index(batch_id)
+        tile_model_conds = self._get_tile_model_conds(x_in)
+        groups = {}
+        for index in range(x_tile.shape[0] // rows_per_tile):
+            conds = tile_model_conds[min(tile_start + index, len(tile_model_conds) - 1)]
+            signature = tuple((key, tuple(value.shape[1:])) for key, value in sorted(conds.items()))
+            groups.setdefault(signature, []).append((index, conds))
+
+        output = torch.empty_like(x_tile)
+        for offset, cond_type in enumerate(cond_or_uncond):
+            for tiles in groups.values():
+                slices = [slice(index * rows_per_tile + offset * batch_size,
+                                index * rows_per_tile + (offset + 1) * batch_size) for index, _ in tiles]
+                c = {}
+                for key, value in c_tile.items():
+                    # NegPip omits neutral weights; do not retain weights from the global prompt.
+                    if cond_type == 0 and key in ("c_crossattn", "c_ppm_negpip_attn_bias", "c_ppm_negpip_v_scale"):
+                        continue
+                    if isinstance(value, torch.Tensor) and value.shape[0] == x_tile.shape[0]:
+                        value = torch.cat([value[s] for s in slices])
+                    c[key] = value
+                if cond_type == 0:
+                    for key in tiles[0][1]:
+                        value = torch.cat([conds[key].expand(batch_size, *conds[key].shape[1:]) for _, conds in tiles])
+                        reference = c_tile.get(key, c_tile["c_crossattn"])
+                        c[key] = value.to(device=x_tile.device, dtype=reference.dtype)
+                if "transformer_options" in c:
+                    c["transformer_options"] = c["transformer_options"].copy()
+                    c["transformer_options"]["cond_or_uncond"] = [cond_type]
+                result = model_function(torch.cat([x_tile[s] for s in slices]),
+                                        torch.cat([t_tile[s] for s in slices]), **c)
+                for s, tile_output in zip(slices, result.split(batch_size)):
+                    output[s] = tile_output
+        return output
+
     def __call__(self, model_function, args: dict):
         self.anzhc_tile_batch_id = 0
 
         def wrapped_model_function(x_tile, t_tile, **c_tile):
             batch_id = self.anzhc_tile_batch_id
             self.anzhc_tile_batch_id += 1
+            if self.anzhc_is_moss:
+                return self._apply_moss_tile_conditioning(
+                    model_function, x_tile, t_tile, c_tile, args["input"], args.get("cond_or_uncond", []), batch_id,
+                )
             injected = self._inject_tile_conditioning(
                 c_tile=c_tile,
                 x_tile=x_tile,
@@ -285,8 +333,8 @@ def apply_tiled_diffusion_model(
     )
 
     compression = get_model_compression(model)
-    impl.tile_width = tile_width // compression
-    impl.tile_height = tile_height // compression
+    impl.tile_width = max(1, tile_width // compression)
+    impl.tile_height = max(1, tile_height // compression)
     impl.tile_overlap = tile_overlap // compression
     impl.tile_batch_size = tile_batch_size
     impl.compression = compression
@@ -301,12 +349,9 @@ def apply_tiled_diffusion_model(
 
 
 def get_model_compression(model) -> int:
-    try:
-        if "CASCADE" in str(model.model.model_type):
-            return 4
-    except AttributeError:
-        pass
-    return 8
+    if "CASCADE" in str(model.model.model_type):
+        return 4
+    return model.model.latent_format.spacial_downscale_ratio
 
 
 @dataclass(frozen=True)
